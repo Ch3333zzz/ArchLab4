@@ -1,0 +1,60 @@
+name: fib_recursive
+config: 
+  lenient_log: true
+source:
+  language: lisp
+  code: |
+    (defun fib (n)
+      (if (<= n 1)
+          n
+          (+ (call fib (- n 1)) (call fib (- n 2)))))
+
+    (setq res (call fib 6))
+    (print res)
+
+input_schedule: []
+expect:
+  output: '8'
+  state: stopped
+  error: false
+  out_code: !!binary |
+    CgYAAAA8AAAAACgjAAAAFgAEAAAVAAQAAEYAAAAAAQAAAABSAQABAFAAAAAAPAAAAAAKAQAAAFsEAAAAH0sAAABQAAAAAB6RAAAAUAAAAAA8AAAAAAoBAAAAWgIAAAA8AAAAACgjAAAAPAAAAABQAAAAADwAAAAACgIAAABaAgAAADwAAAAAKCMAAABaAQAAAB6WAAAAUwAAAAApAAAAAA==
+  out_code_hex: |
+    0 - 0A06000000 - LOAD_IMM 6
+    5 - 3C00000000 - PUSH_IMM 0
+    10 - 2823000000 - CALL 35
+    15 - 1600040000 - STORE_MEM 1024
+    20 - 1500040000 - LOAD_MEM 1024
+    25 - 4600000000 - PRINT
+    30 - 0100000000 - HALT
+    35 - 5201000100 - ENTER 65537
+    40 - 5000000000 - LOAD_LOCAL 0
+    45 - 3C00000000 - PUSH_IMM 0
+    50 - 0A01000000 - LOAD_IMM 1
+    55 - 5B04000000 - CMP_POP 4
+    60 - 1F4B000000 - BEQZ 75
+    65 - 5000000000 - LOAD_LOCAL 0
+    70 - 1E91000000 - JMP 145
+    75 - 5000000000 - LOAD_LOCAL 0
+    80 - 3C00000000 - PUSH_IMM 0
+    85 - 0A01000000 - LOAD_IMM 1
+    90 - 5A02000000 - BINOP_POP 2
+    95 - 3C00000000 - PUSH_IMM 0
+    100 - 2823000000 - CALL 35
+    105 - 3C00000000 - PUSH_IMM 0
+    110 - 5000000000 - LOAD_LOCAL 0
+    115 - 3C00000000 - PUSH_IMM 0
+    120 - 0A02000000 - LOAD_IMM 2
+    125 - 5A02000000 - BINOP_POP 2
+    130 - 3C00000000 - PUSH_IMM 0
+    135 - 2823000000 - CALL 35
+    140 - 5A01000000 - BINOP_POP 1
+    145 - 1E96000000 - JMP 150
+    150 - 5300000000 - LEAVE 0
+    155 - 2900000000 - RET
+  out_log: |
+    DEBUG root:processor.py:137 Warning: data section uses 1025 words but string_pool_cells=1024. Some static strings may live outside the pool and won't be treated as pstr by PRINT.
+    DEBUG root:processor.py:357 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
+    DEBUG root:processor.py:655 PRINT: numeric -> 8
+    DEBUG root:processor.py:241 [MMIO OUT] wrote 56 -> char: 8
+    DEBUG root:processor.py:409 HALT encountered

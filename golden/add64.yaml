@@ -1,0 +1,251 @@
+name: add64
+config:
+source:
+  language: lisp
+  code: |
+    
+    (setq A_hi 1)
+    (setq A_lo 4294967295)
+    (setq B_hi 0)
+    (setq B_lo 1)
+
+    (setq lo_sum (+ A_lo B_lo))
+    (if (>= lo_sum 4294967296)
+      (progn
+        (setq carry 1)
+        (setq lo (- lo_sum 4294967296))
+      )
+      (progn
+        (setq carry 0)
+        (setq lo lo_sum)
+      )
+    )
+
+    (setq hi_sum (+ A_hi B_hi carry))
+    (setq hi hi_sum)
+
+    (print hi)
+    (print lo)
+expect:
+  out_stdout: "20"
+  state: stopped
+  out_code: !!binary |
+    CgEAAAAWAAQAAAr/////FgEEAAAKAAAAABYCBAAACgEAAAAWAwQAABUBBAAAPAAAAAAVAwQAAFoBAAAAFgQEAAAVBAQAADwAAAAACgAAAABbBgAAAB+CAAAACgEAAAAWBQQAABUEBAAAPAAAAAAKAAAAAFoCAAAAFgYEAAAelgAAAAoAAAAAFgUEAAAVBAQAABYGBAAAFQAEAAA8AAAAABUCBAAAWgEAAAA8AAAAABUFBAAAWgEAAAAWBwQAABUHBAAAFggEAAAVCAQAAEYAAAAAFQYEAABGAAAAAAEAAAAA
+  out_code_hex: |-
+    0 - 0A01000000 - LOAD_IMM 1
+    5 - 1600040000 - STORE_MEM 1024
+    10 - 0AFFFFFFFF - LOAD_IMM -1
+    15 - 1601040000 - STORE_MEM 1025
+    20 - 0A00000000 - LOAD_IMM 0
+    25 - 1602040000 - STORE_MEM 1026
+    30 - 0A01000000 - LOAD_IMM 1
+    35 - 1603040000 - STORE_MEM 1027
+    40 - 1501040000 - LOAD_MEM 1025
+    45 - 3C00000000 - PUSH_IMM 0
+    50 - 1503040000 - LOAD_MEM 1027
+    55 - 5A01000000 - BINOP_POP 1
+    60 - 1604040000 - STORE_MEM 1028
+    65 - 1504040000 - LOAD_MEM 1028
+    70 - 3C00000000 - PUSH_IMM 0
+    75 - 0A00000000 - LOAD_IMM 0
+    80 - 5B06000000 - CMP_POP 6
+    85 - 1F82000000 - BEQZ 130
+    90 - 0A01000000 - LOAD_IMM 1
+    95 - 1605040000 - STORE_MEM 1029
+    100 - 1504040000 - LOAD_MEM 1028
+    105 - 3C00000000 - PUSH_IMM 0
+    110 - 0A00000000 - LOAD_IMM 0
+    115 - 5A02000000 - BINOP_POP 2
+    120 - 1606040000 - STORE_MEM 1030
+    125 - 1E96000000 - JMP 150
+    130 - 0A00000000 - LOAD_IMM 0
+    135 - 1605040000 - STORE_MEM 1029
+    140 - 1504040000 - LOAD_MEM 1028
+    145 - 1606040000 - STORE_MEM 1030
+    150 - 1500040000 - LOAD_MEM 1024
+    155 - 3C00000000 - PUSH_IMM 0
+    160 - 1502040000 - LOAD_MEM 1026
+    165 - 5A01000000 - BINOP_POP 1
+    170 - 3C00000000 - PUSH_IMM 0
+    175 - 1505040000 - LOAD_MEM 1029
+    180 - 5A01000000 - BINOP_POP 1
+    185 - 1607040000 - STORE_MEM 1031
+    190 - 1507040000 - LOAD_MEM 1031
+    195 - 1608040000 - STORE_MEM 1032
+    200 - 1508040000 - LOAD_MEM 1032
+    205 - 4600000000 - PRINT
+    210 - 1506040000 - LOAD_MEM 1030
+    215 - 4600000000 - PRINT
+    220 - 0100000000 - HALT
+  out_log: |
+    DEBUG root:processor.py:137 Warning: data section uses 1033 words but string_pool_cells=1024. Some static strings may live outside the pool and won't be treated as pstr by PRINT.
+    DEBUG root:processor.py:357 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    0 PC:  4132 ADDR:     0 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    0 PC:  4132 ADDR:     0 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 1
+    DEBUG root:processor.py:396 Tick 0 PC 4132: LOAD_IMM 1 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    0 PC:  4137 ADDR:     1 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_IMM 1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    1 PC:  4137 ADDR:     1 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    1 PC:  4137 ADDR:     1 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: STORE_MEM 1024
+    DEBUG root:processor.py:396 Tick 1 PC 4137: STORE_MEM 1024 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    1 PC:  4142 ADDR:     2 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: STORE_MEM 1024
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    2 PC:  4142 ADDR:     2 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    2 PC:  4142 ADDR:     2 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_IMM -1
+    DEBUG root:processor.py:396 Tick 2 PC 4142: LOAD_IMM -1 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    2 PC:  4147 ADDR:     3 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: LOAD_IMM -1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    3 PC:  4147 ADDR:     3 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    3 PC:  4147 ADDR:     3 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: STORE_MEM 1025
+    DEBUG root:processor.py:396 Tick 3 PC 4147: STORE_MEM 1025 ACC=-1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    3 PC:  4152 ADDR:     5 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: STORE_MEM 1025
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    4 PC:  4152 ADDR:     5 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    4 PC:  4152 ADDR:     5 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: LOAD_IMM 0
+    DEBUG root:processor.py:396 Tick 4 PC 4152: LOAD_IMM 0 ACC=-1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    4 PC:  4157 ADDR:     6 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    5 PC:  4157 ADDR:     6 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    5 PC:  4157 ADDR:     6 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: STORE_MEM 1026
+    DEBUG root:processor.py:396 Tick 5 PC 4157: STORE_MEM 1026 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    5 PC:  4162 ADDR:     7 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: STORE_MEM 1026
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    6 PC:  4162 ADDR:     7 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    6 PC:  4162 ADDR:     7 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 1
+    DEBUG root:processor.py:396 Tick 6 PC 4162: LOAD_IMM 1 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    6 PC:  4167 ADDR:     8 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_IMM 1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    7 PC:  4167 ADDR:     8 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    7 PC:  4167 ADDR:     8 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: STORE_MEM 1027
+    DEBUG root:processor.py:396 Tick 7 PC 4167: STORE_MEM 1027 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    7 PC:  4172 ADDR:    10 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: STORE_MEM 1027
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    8 PC:  4172 ADDR:    10 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    8 PC:  4172 ADDR:    10 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1025
+    DEBUG root:processor.py:396 Tick 8 PC 4172: LOAD_MEM 1025 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    8 PC:  4177 ADDR:    11 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: LOAD_MEM 1025
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    9 PC:  4177 ADDR:    11 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    9 PC:  4177 ADDR:    11 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:396 Tick 9 PC 4177: PUSH_IMM 0 ACC=-1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    9 PC:  4182 ADDR:    12 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   10 PC:  4182 ADDR:    12 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   10 PC:  4182 ADDR:    12 MEM[ADDR]:          0 ACC:         -1 C: 0 V: 0	INSTR: LOAD_MEM 1027
+    DEBUG root:processor.py:396 Tick 10 PC 4182: LOAD_MEM 1027 ACC=-1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   10 PC:  4187 ADDR:    13 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1027
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   11 PC:  4187 ADDR:    13 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   11 PC:  4187 ADDR:    13 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: BINOP_POP 1
+    DEBUG root:processor.py:396 Tick 11 PC 4187: BINOP_POP 1 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   11 PC:  4192 ADDR:    15 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: BINOP_POP 1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   12 PC:  4192 ADDR:    15 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   12 PC:  4192 ADDR:    15 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: STORE_MEM 1028
+    DEBUG root:processor.py:396 Tick 12 PC 4192: STORE_MEM 1028 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   12 PC:  4197 ADDR:    16 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: STORE_MEM 1028
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   13 PC:  4197 ADDR:    16 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   13 PC:  4197 ADDR:    16 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_MEM 1028
+    DEBUG root:processor.py:396 Tick 13 PC 4197: LOAD_MEM 1028 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   13 PC:  4202 ADDR:    17 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_MEM 1028
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   14 PC:  4202 ADDR:    17 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   14 PC:  4202 ADDR:    17 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:396 Tick 14 PC 4202: PUSH_IMM 0 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   14 PC:  4207 ADDR:    18 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   15 PC:  4207 ADDR:    18 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   15 PC:  4207 ADDR:    18 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 0
+    DEBUG root:processor.py:396 Tick 15 PC 4207: LOAD_IMM 0 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   15 PC:  4212 ADDR:    20 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   16 PC:  4212 ADDR:    20 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   16 PC:  4212 ADDR:    20 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: CMP_POP 6
+    DEBUG root:processor.py:396 Tick 16 PC 4212: CMP_POP 6 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   16 PC:  4217 ADDR:    21 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: CMP_POP 6
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   17 PC:  4217 ADDR:    21 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   17 PC:  4217 ADDR:    21 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: BEQZ 130
+    DEBUG root:processor.py:396 Tick 17 PC 4217: BEQZ 130 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   17 PC:  4222 ADDR:    22 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: BEQZ 130
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   18 PC:  4222 ADDR:    22 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   18 PC:  4222 ADDR:    22 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_IMM 1
+    DEBUG root:processor.py:396 Tick 18 PC 4222: LOAD_IMM 1 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   18 PC:  4227 ADDR:    23 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_IMM 1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   19 PC:  4227 ADDR:    23 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   19 PC:  4227 ADDR:    23 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: STORE_MEM 1029
+    DEBUG root:processor.py:396 Tick 19 PC 4227: STORE_MEM 1029 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   19 PC:  4232 ADDR:    25 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: STORE_MEM 1029
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   20 PC:  4232 ADDR:    25 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   20 PC:  4232 ADDR:    25 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1028
+    DEBUG root:processor.py:396 Tick 20 PC 4232: LOAD_MEM 1028 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   20 PC:  4237 ADDR:    26 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_MEM 1028
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   21 PC:  4237 ADDR:    26 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   21 PC:  4237 ADDR:    26 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:396 Tick 21 PC 4237: PUSH_IMM 0 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   21 PC:  4242 ADDR:    27 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   22 PC:  4242 ADDR:    27 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   22 PC:  4242 ADDR:    27 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 0
+    DEBUG root:processor.py:396 Tick 22 PC 4242: LOAD_IMM 0 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   22 PC:  4247 ADDR:    28 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   23 PC:  4247 ADDR:    28 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   23 PC:  4247 ADDR:    28 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: BINOP_POP 2
+    DEBUG root:processor.py:396 Tick 23 PC 4247: BINOP_POP 2 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   23 PC:  4252 ADDR:    30 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: BINOP_POP 2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   24 PC:  4252 ADDR:    30 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   24 PC:  4252 ADDR:    30 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: STORE_MEM 1030
+    DEBUG root:processor.py:396 Tick 24 PC 4252: STORE_MEM 1030 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   24 PC:  4257 ADDR:    31 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: STORE_MEM 1030
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   25 PC:  4257 ADDR:    31 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   25 PC:  4257 ADDR:    31 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: JMP 150
+    DEBUG root:processor.py:396 Tick 25 PC 4257: JMP 150 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   25 PC:  4282 ADDR:    37 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: JMP 150
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   26 PC:  4282 ADDR:    37 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   26 PC:  4282 ADDR:    37 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_MEM 1024
+    DEBUG root:processor.py:396 Tick 26 PC 4282: LOAD_MEM 1024 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   26 PC:  4287 ADDR:    38 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1024
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   27 PC:  4287 ADDR:    38 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   27 PC:  4287 ADDR:    38 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:396 Tick 27 PC 4287: PUSH_IMM 0 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   27 PC:  4292 ADDR:    40 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   28 PC:  4292 ADDR:    40 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   28 PC:  4292 ADDR:    40 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1026
+    DEBUG root:processor.py:396 Tick 28 PC 4292: LOAD_MEM 1026 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   28 PC:  4297 ADDR:    41 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_MEM 1026
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   29 PC:  4297 ADDR:    41 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   29 PC:  4297 ADDR:    41 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: BINOP_POP 1
+    DEBUG root:processor.py:396 Tick 29 PC 4297: BINOP_POP 1 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   29 PC:  4302 ADDR:    42 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: BINOP_POP 1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   30 PC:  4302 ADDR:    42 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   30 PC:  4302 ADDR:    42 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:396 Tick 30 PC 4302: PUSH_IMM 0 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   30 PC:  4307 ADDR:    43 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: PUSH_IMM 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   31 PC:  4307 ADDR:    43 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   31 PC:  4307 ADDR:    43 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1029
+    DEBUG root:processor.py:396 Tick 31 PC 4307: LOAD_MEM 1029 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   31 PC:  4312 ADDR:    45 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: LOAD_MEM 1029
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   32 PC:  4312 ADDR:    45 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   32 PC:  4312 ADDR:    45 MEM[ADDR]:          0 ACC:          1 C: 0 V: 0	INSTR: BINOP_POP 1
+    DEBUG root:processor.py:396 Tick 32 PC 4312: BINOP_POP 1 ACC=1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   32 PC:  4317 ADDR:    46 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: BINOP_POP 1
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   33 PC:  4317 ADDR:    46 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   33 PC:  4317 ADDR:    46 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: STORE_MEM 1031
+    DEBUG root:processor.py:396 Tick 33 PC 4317: STORE_MEM 1031 ACC=2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   33 PC:  4322 ADDR:    47 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: STORE_MEM 1031
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   34 PC:  4322 ADDR:    47 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   34 PC:  4322 ADDR:    47 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: LOAD_MEM 1031
+    DEBUG root:processor.py:396 Tick 34 PC 4322: LOAD_MEM 1031 ACC=2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   34 PC:  4327 ADDR:    48 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: LOAD_MEM 1031
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   35 PC:  4327 ADDR:    48 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   35 PC:  4327 ADDR:    48 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: STORE_MEM 1032
+    DEBUG root:processor.py:396 Tick 35 PC 4327: STORE_MEM 1032 ACC=2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   35 PC:  4332 ADDR:    50 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: STORE_MEM 1032
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   36 PC:  4332 ADDR:    50 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   36 PC:  4332 ADDR:    50 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: LOAD_MEM 1032
+    DEBUG root:processor.py:396 Tick 36 PC 4332: LOAD_MEM 1032 ACC=2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   36 PC:  4337 ADDR:    51 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: LOAD_MEM 1032
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   37 PC:  4337 ADDR:    51 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   37 PC:  4337 ADDR:    51 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:396 Tick 37 PC 4337: PRINT 0 ACC=2
+    DEBUG root:processor.py:655 PRINT: numeric -> 2
+    DEBUG root:processor.py:241 [MMIO OUT] wrote 50 -> char: 2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   37 PC:  4342 ADDR:    52 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   38 PC:  4342 ADDR:    52 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   38 PC:  4342 ADDR:    52 MEM[ADDR]:          0 ACC:          2 C: 0 V: 0	INSTR: LOAD_MEM 1030
+    DEBUG root:processor.py:396 Tick 38 PC 4342: LOAD_MEM 1030 ACC=2
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   38 PC:  4347 ADDR:    53 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: LOAD_MEM 1030
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   39 PC:  4347 ADDR:    53 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   39 PC:  4347 ADDR:    53 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:396 Tick 39 PC 4347: PRINT 0 ACC=0
+    DEBUG root:processor.py:655 PRINT: numeric -> 0
+    DEBUG root:processor.py:241 [MMIO OUT] wrote 48 -> char: 0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   39 PC:  4352 ADDR:    55 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:   40 PC:  4352 ADDR:    55 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:   40 PC:  4352 ADDR:    55 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: HALT
+    DEBUG root:processor.py:396 Tick 40 PC 4352: HALT 0 ACC=0
+    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:   40 PC:  4357 ADDR:    56 MEM[ADDR]:          0 ACC:          0 C: 0 V: 0	INSTR: HALT
+    DEBUG root:processor.py:409 HALT encountered

@@ -1,0 +1,5 @@
+(setq ch (read))
+    (while (!= ch 0)
+      (out ch)
+      (setq ch (read))
+    )

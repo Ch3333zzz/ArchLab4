@@ -1,0 +1,8 @@
+(print "What is your name?\n")
+    (print "Hello, ")
+    (setq ch (read))
+    (while (!= ch 10)
+      (out ch)
+      (setq ch (read))
+    )
+    (print "!")
