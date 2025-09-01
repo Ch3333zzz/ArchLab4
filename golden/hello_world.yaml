@@ -15,31 +15,31 @@ expect:
     5 - 4600000000 - PRINT
     10 - 0100000000 - HALT
   out_log: |-
-    DEBUG root:processor.py:357 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    0 PC:  4096 ADDR:     0 MEM[ADDR]:         13 ACC:          0 C: 0 V: 0	INSTR: fetch
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    0 PC:  4096 ADDR:     0 MEM[ADDR]:         13 ACC:          0 C: 0 V: 0	INSTR: LOAD_CONST 0
-    DEBUG root:processor.py:396 Tick 0 PC 4096: LOAD_CONST 0 ACC=0
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    0 PC:  4101 ADDR:     1 MEM[ADDR]:         72 ACC:          0 C: 0 V: 0	INSTR: LOAD_CONST 0
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    1 PC:  4101 ADDR:     1 MEM[ADDR]:         72 ACC:          0 C: 0 V: 0	INSTR: fetch
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    1 PC:  4101 ADDR:     1 MEM[ADDR]:         72 ACC:          0 C: 0 V: 0	INSTR: PRINT
-    DEBUG root:processor.py:396 Tick 1 PC 4101: PRINT 0 ACC=0
-    DEBUG root:processor.py:646 PRINT: Detected pstr at 0 len=13
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 72 -> char: H
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 101 -> char: e
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 108 -> char: l
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 108 -> char: l
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 111 -> char: o
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 44 -> char: ,
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 32 -> char:  
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 119 -> char: w
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 111 -> char: o
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 114 -> char: r
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 108 -> char: l
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 100 -> char: d
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 33 -> char: !
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    1 PC:  4106 ADDR:     2 MEM[ADDR]:        101 ACC:          0 C: 0 V: 0	INSTR: PRINT
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    2 PC:  4106 ADDR:     2 MEM[ADDR]:        101 ACC:          0 C: 0 V: 0	INSTR: fetch
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    2 PC:  4106 ADDR:     2 MEM[ADDR]:        101 ACC:          0 C: 0 V: 0	INSTR: HALT
-    DEBUG root:processor.py:396 Tick 2 PC 4106: HALT 0 ACC=0
-    DEBUG root:processor.py:339 STATE: RUNNING    STEP: EXECUTION       TICK:    2 PC:  4111 ADDR:     3 MEM[ADDR]:        108 ACC:          0 C: 0 V: 0	INSTR: HALT
-    DEBUG root:processor.py:409 HALT encountered
+    DEBUG root:processor.py:475 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    0 PC:  4096 ADDR:     0 MEM[ADDR]:         13 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    0 PC:  4096 ADDR:     0 MEM[ADDR]:         13 ACC:          0 C: 0 V: 0	INSTR: LOAD_CONST 0
+    DEBUG root:processor.py:551 Tick 0 PC 4096: LOAD_CONST 0 ACC=0
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: EXECUTION       TICK:    0 PC:  4101 ADDR:     1 MEM[ADDR]:         72 ACC:          0 C: 0 V: 0	INSTR: LOAD_CONST 0
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    1 PC:  4101 ADDR:     1 MEM[ADDR]:         72 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    1 PC:  4101 ADDR:     1 MEM[ADDR]:         72 ACC:          0 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:551 Tick 1 PC 4101: PRINT 0 ACC=0
+    DEBUG root:processor.py:818 PRINT: Detected pstr at 0 len=13
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 72 -> char: H
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 101 -> char: e
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 108 -> char: l
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 108 -> char: l
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 111 -> char: o
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 44 -> char: ,
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 32 -> char:  
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 119 -> char: w
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 111 -> char: o
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 114 -> char: r
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 108 -> char: l
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 100 -> char: d
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 33 -> char: !
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: EXECUTION       TICK:    1 PC:  4106 ADDR:     2 MEM[ADDR]:        101 ACC:          0 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    2 PC:  4106 ADDR:     2 MEM[ADDR]:        101 ACC:          0 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    2 PC:  4106 ADDR:     2 MEM[ADDR]:        101 ACC:          0 C: 0 V: 0	INSTR: HALT
+    DEBUG root:processor.py:551 Tick 2 PC 4106: HALT 0 ACC=0
+    DEBUG root:processor.py:450 STATE: RUNNING    STEP: EXECUTION       TICK:    2 PC:  4111 ADDR:     3 MEM[ADDR]:        108 ACC:          0 C: 0 V: 0	INSTR: HALT
+    DEBUG root:processor.py:579 HALT encountered

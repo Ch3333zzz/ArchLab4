@@ -468,60 +468,58 @@ expect:
     1865 - 16F1FF0000 - STORE_MEM 65521
     1870 - 0100000000 - HALT
   out_log: |
-    DEBUG root:processor.py:137 Warning: data section uses 1040 words but string_pool_cells=1024. Some static strings may live outside the pool and won't be treated as pstr by PRINT.
-    DEBUG root:processor.py:309 Datapath.schedule_input called, 8 events attached
-    DEBUG root:processor.py:664 READ: no data -> retrying next tick
-    DEBUG root:processor.py:664 READ: no data -> retrying next tick
-    DEBUG root:processor.py:664 READ: no data -> retrying next tick
-    DEBUG root:processor.py:664 READ: no data -> retrying next tick
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 51
-    DEBUG root:processor.py:370 [tick 10] input arrived: '3' (source=IN)
-    DEBUG root:processor.py:376 [tick 10] ** INTERRUPT (IN) -> vector None **
-    DEBUG root:processor.py:437 No interruption_vector set -> ignore interrupt
-    DEBUG root:processor.py:675 READ: got 51 ('3')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 51
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 32
-    DEBUG root:processor.py:370 [tick 30] input arrived: ' ' (source=IN)
-    DEBUG root:processor.py:675 READ: got 32 (' ')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 32
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 49
-    DEBUG root:processor.py:370 [tick 50] input arrived: '1' (source=IN)
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 32
-    DEBUG root:processor.py:370 [tick 70] input arrived: ' ' (source=IN)
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 52
-    DEBUG root:processor.py:370 [tick 90] input arrived: '4' (source=IN)
-    DEBUG root:processor.py:675 READ: got 49 ('1')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 49
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 32
-    DEBUG root:processor.py:370 [tick 110] input arrived: ' ' (source=IN)
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 50
-    DEBUG root:processor.py:370 [tick 130] input arrived: '2' (source=IN)
-    DEBUG root:processor.py:675 READ: got 32 (' ')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 32
-    DEBUG root:processor.py:255 [MMIO IN] input cell set to 10
-    DEBUG root:processor.py:370 [tick 150] input arrived: '\n' (source=IN)
-    DEBUG root:processor.py:675 READ: got 52 ('4')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 52
-    DEBUG root:processor.py:675 READ: got 32 (' ')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 32
-    DEBUG root:processor.py:675 READ: got 50 ('2')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 50
-    DEBUG root:processor.py:675 READ: got 10 ('
+    DEBUG root:processor.py:197 Warning: data section uses 1040 words but string_pool_cells=1024. Some static strings may live outside the pool and won't be treated as pstr by PRINT.
+    DEBUG root:processor.py:394 Datapath.schedule_input called, 8 events attached
+    DEBUG root:processor.py:836 READ: no data -> retrying next tick
+    DEBUG root:processor.py:836 READ: no data -> retrying next tick
+    DEBUG root:processor.py:836 READ: no data -> retrying next tick
+    DEBUG root:processor.py:836 READ: no data -> retrying next tick
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 51
+    DEBUG root:processor.py:488 [tick 10] input arrived: '3' (source=IN)
+    DEBUG root:processor.py:498 [tick 10] ** INTERRUPT (IN) -> vector None **
+    DEBUG root:processor.py:611 No interruption_vector set -> ignore interrupt
+    DEBUG root:processor.py:845 READ: got 51 ('3')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 51
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 32
+    DEBUG root:processor.py:488 [tick 30] input arrived: ' ' (source=IN)
+    DEBUG root:processor.py:845 READ: got 32 (' ')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 32
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 49
+    DEBUG root:processor.py:488 [tick 50] input arrived: '1' (source=IN)
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 32
+    DEBUG root:processor.py:488 [tick 70] input arrived: ' ' (source=IN)
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 52
+    DEBUG root:processor.py:488 [tick 90] input arrived: '4' (source=IN)
+    DEBUG root:processor.py:845 READ: got 49 ('1')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 49
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 32
+    DEBUG root:processor.py:488 [tick 110] input arrived: ' ' (source=IN)
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 50
+    DEBUG root:processor.py:488 [tick 130] input arrived: '2' (source=IN)
+    DEBUG root:processor.py:845 READ: got 32 (' ')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 32
+    DEBUG root:processor.py:315 [MMIO IN] input cell set to 10
+    DEBUG root:processor.py:488 [tick 150] input arrived: '\n' (source=IN)
+    DEBUG root:processor.py:845 READ: got 52 ('4')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 52
+    DEBUG root:processor.py:845 READ: got 32 (' ')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 32
+    DEBUG root:processor.py:845 READ: got 50 ('2')
+    DEBUG root:processor.py:320 [MMIO IN] consumed 50
+    DEBUG root:processor.py:845 READ: got 10 ('
     ')
-    DEBUG root:processor.py:262 [MMIO IN] consumed 10
-    DEBUG root:processor.py:655 PRINT: numeric -> 1
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 49 -> char: 1
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 32 -> char:  
-    DEBUG root:processor.py:655 PRINT: numeric -> 2
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 50 -> char: 2
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 32 -> char:  
-    DEBUG root:processor.py:655 PRINT: numeric -> 3
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 51 -> char: 3
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 32 -> char:  
-    DEBUG root:processor.py:655 PRINT: numeric -> 4
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 52 -> char: 4
-    DEBUG root:processor.py:241 [MMIO OUT] wrote 10 -> char: 
+    DEBUG root:processor.py:320 [MMIO IN] consumed 10
+    DEBUG root:processor.py:827 PRINT: numeric -> 1
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 49 -> char: 1
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 32 -> char:  
+    DEBUG root:processor.py:827 PRINT: numeric -> 2
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 50 -> char: 2
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 32 -> char:  
+    DEBUG root:processor.py:827 PRINT: numeric -> 3
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 51 -> char: 3
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 32 -> char:  
+    DEBUG root:processor.py:827 PRINT: numeric -> 4
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 52 -> char: 4
+    DEBUG root:processor.py:305 [MMIO OUT] wrote 10 -> char: 
 
-    DEBUG root:processor.py:409 HALT encountered
-
-      
+    DEBUG root:processor.py:579 HALT encountered

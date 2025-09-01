@@ -1,18 +1,27 @@
-import struct
-import logging
-import os
-import sys
+"""Processor (Datapath + ControlUnit) and CLI wrapper.
 
-from isa import decode_instr, INSTR_SIZE, OpCode, mnemonic
-from config import load_config, ConfigError
+Provides VM execution, logging initialization and optional debug output
+files (out.bin / out.hex) emitted when debug logging is enabled.
+"""
+
+from __future__ import annotations
+
+import logging
+import struct
+import sys
+from pathlib import Path
+from typing import Any, TextIO
+
+from config import ConfigError, load_config
+from isa import INSTR_SIZE, OpCode, decode_instr, mnemonic
 
 LOGFILE = "processor.log"
 
 
-def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = False):
-    """
-    Configure root logger to write to `logfile`. If debug=True set DEBUG level.
-    If console=True also echo logs to stdout.
+def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = False) -> None:
+    """Configure root logger to write to `logfile`.
+
+    If debug=True set DEBUG level. If console=True also echo logs to stdout.
 
     IMPORTANT: by default (debug=False) logging is effectively disabled
     (root level = CRITICAL) so normal runs produce no logging output.
@@ -22,19 +31,15 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    if debug:
-        lvl = logging.DEBUG
-    else:
-        # suppress ordinary logging by setting very high threshold
-        lvl = logging.CRITICAL
-
+    lvl = logging.DEBUG if debug else logging.CRITICAL
     root.setLevel(lvl)
 
     if debug:
         # file handler (write debug logs only when debug=True)
+        fmt = "%(levelname)-5s %(name)s:%(filename)s:%(lineno)d %(message)s"
         fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
         fh.setLevel(lvl)
-        fh.setFormatter(logging.Formatter("%(levelname)-5s %(name)s:%(filename)s:%(lineno)d %(message)s"))
+        fh.setFormatter(logging.Formatter(fmt))
         root.addHandler(fh)
 
         if console:
@@ -46,14 +51,11 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     return
 
 
-def _write_debug_out_files(code_bytes: bytes):
-    """
-    When debug logging is on, write out.bin (raw machine code) and out.hex (disassembly).
-    Flush logging handlers first to ensure processor.log is complete.
-    """
-    # flush logging handlers
+# --- debug output helpers (split out to reduce complexity) ---
+def _flush_logging_handlers() -> None:
+    """Flush and close logging handlers."""
     try:
-        for h in logging.getLogger().handlers:
+        for h in list(logging.getLogger().handlers):
             try:
                 if hasattr(h, "flush"):
                     h.flush()
@@ -62,22 +64,26 @@ def _write_debug_out_files(code_bytes: bytes):
     except Exception:
         pass
 
+
+def _write_out_bin(code_bytes: bytes) -> None:
+    """Write raw binary out.bin."""
     try:
-        # write binary
         with open("out.bin", "wb") as f:
             f.write(code_bytes)
     except Exception as e:
-        logging.debug(f"Failed to write out.bin: {e}")
+        logging.debug("Failed to write out.bin: %s", e)
 
-    # produce code_hex (disassembly) from raw code_bytes (same format as tests)
+
+def _write_out_hex(code_bytes: bytes) -> None:
+    """Produce text disassembly (out.hex) from code_bytes."""
     try:
-        code_hex_lines = []
+        code_hex_lines: list[str] = []
         pc = 0
         code_len = len(code_bytes)
         while pc + INSTR_SIZE <= code_len:
             try:
                 opcode, arg = decode_instr(code_bytes, pc)
-                instr_bytes = code_bytes[pc:pc + INSTR_SIZE]
+                instr_bytes = code_bytes[pc : pc + INSTR_SIZE]
                 hexbytes = instr_bytes.hex().upper()
                 try:
                     mnem = mnemonic(opcode, arg)
@@ -93,22 +99,73 @@ def _write_debug_out_files(code_bytes: bytes):
         with open("out.hex", "w", encoding="utf-8") as f:
             f.write(code_hex)
     except Exception as e:
-        logging.debug(f"Failed to write out.hex: {e}")
+        logging.debug("Failed to write out.hex: %s", e)
+
+
+def _write_debug_out_files(code_bytes: bytes) -> None:
+    """When debug logging is on, write out.bin, out.hex.
+
+    Flush logging handlers first to ensure processor.log is complete.
+    """
+    _flush_logging_handlers()
+    _write_out_bin(code_bytes)
+    _write_out_hex(code_bytes)
 
 
 class Datapath:
+    """Datapath (memory + registers + MMIO buffers) for the VM."""
+
+    # configuration
+    code_bytes: bytes
+    data_bytes: bytes
+    mem_cells: int
+    mem_bytes: int
+    memory: bytearray
+
+    string_pool_cells: int
+    lenient_log: bool
+
+    code_start: int
+    code_len: int
+
+    PC: int
+    ACC: int
+    runtime_stack: list[int]
+    call_stack: list[int]
+    tick: int
+    interrupt_ready: bool
+    interruption_allowed: bool
+    interruption_vector: int | None
+    in_interruption: bool
+    interrupt_return_state: tuple[int, int] | None
+    input_schedule: list[tuple[int, str]]
+    input_closed: bool
+    mmio_in: int
+    mmio_out: int
+    mmio_in_buffer: list[int]
+    mmio_out_buffer: list[int]
+    mmio_in_cell: int
+    output_buffer: list[int]
+    tick_limit: int
+    pause_tick: int | None
+    last_interrupt_source: str | None
+
+    FP: int
+    frame_stack: list[int]
+
     def __init__(
         self,
         code_bytes: bytes,
         data_bytes: bytes,
-        mem_cells=65536,
-        mmio_in=0xFFF0,
-        mmio_out=0xFFF1,
-        tick_limit=100000,
-        pause_tick=None,
-        string_pool_cells=1024,
-        lenient_log=False,
-    ):
+        mem_cells: int = 65536,
+        mmio_in: int = 0xFFF0,
+        mmio_out: int = 0xFFF1,
+        tick_limit: int = 100000,
+        pause_tick: int | None = None,
+        string_pool_cells: int = 1024,
+        lenient_log: bool = False,
+    ) -> None:
+        """Initialize Datapath state and memory layout."""
         # keep raw code/data
         self.code_bytes = code_bytes or b""
         self.data_bytes = data_bytes or b""
@@ -121,7 +178,8 @@ class Datapath:
         # write data bytes at start of memory (offset 0)
         data_len = len(self.data_bytes)
         if data_len > self.mem_bytes:
-            raise MemoryError("Initial data doesn't fit into memory")
+            err = "Initial data doesn't fit into memory"
+            raise MemoryError(err)
         self.memory[0:data_len] = self.data_bytes
 
         # string pool size (in words)
@@ -133,15 +191,16 @@ class Datapath:
         # warn if data uses more words than pool
         data_words = data_len // 4
         if data_words > self.string_pool_cells:
-            logging.debug(
-                f"Warning: data section uses {data_words} words but string_pool_cells={self.string_pool_cells}. "
-                "Some static strings may live outside the pool and won't be treated as pstr by PRINT."
-            )
+            # split becouse of ruff
+            part1 = f"Warning: data section uses {data_words} words but string_pool_cells={self.string_pool_cells}."
+            part2 = " Some static strings may live outside the pool and won't be treated as pstr by PRINT."
+            logging.debug(part1 + part2)
 
         # write code bytes right after data
         code_len = len(self.code_bytes)
         if data_len + code_len > self.mem_bytes:
-            raise MemoryError("Code and data don't fit into memory")
+            err = "Code and data don't fit into memory"
+            raise MemoryError(err)
         self.code_start = data_len  # byte offset where code begins
         self.memory[self.code_start : self.code_start + code_len] = self.code_bytes
         self.code_len = code_len
@@ -158,14 +217,15 @@ class Datapath:
         self.in_interruption = False
         self.interrupt_return_state = None
         self.input_schedule = []
-        self.input_closed = False  # when newline read or no more scheduled input -> stop consuming schedule
+        # MMIO
+        self.input_closed = False
         self.mmio_in = mmio_in
         self.mmio_out = mmio_out
         # MMIO buffers for pstr semantics
-        self.mmio_in_buffer = []   # ints (queued input chars)
-        self.mmio_out_buffer = []  # ints (what was written to mmio_out pstr)
+        self.mmio_in_buffer = []
+        self.mmio_out_buffer = []
         self.mmio_in_cell = 0
-        self.output_buffer = []    # ints - canonical "printed" bytes
+        self.output_buffer = []
         self.tick_limit = tick_limit
         self.pause_tick = pause_tick
         self.last_interrupt_source = None  # 'IN' or 'OUT'
@@ -175,44 +235,59 @@ class Datapath:
         self.frame_stack = []
 
     # helpers to read/write 4-byte words in little-endian
-    def _word_byte_offset(self, word_addr):
+    def _word_byte_offset(self, word_addr: int) -> int:
         return int(word_addr) * 4
 
-    def read_word(self, word_addr):
+    def read_word(self, word_addr: int) -> int:
+        """Read a 4-byte little-endian signed word from memory.
+
+        Returns 0 on out-of-range accesses.
+        """
         off = self._word_byte_offset(word_addr)
         if off < 0 or off + 4 > len(self.memory):
             return 0
-        return struct.unpack("<i", self.memory[off : off + 4])[0]
+        # use int.from_bytes for clearer typing
+        return int.from_bytes(self.memory[off : off + 4], byteorder="little", signed=True)
 
-    def write_word(self, word_addr, value):
+    def write_word(self, word_addr: int, value: int) -> None:
+        """Write a 4-byte little-endian signed word to memory.
+
+        Raises MemoryError for out-of-range writes.
+        """
         off = self._word_byte_offset(word_addr)
         if off < 0 or off + 4 > len(self.memory):
-            raise MemoryError(f"write_word out of memory: word {word_addr} (byte {off})")
+            err = f"write_word out of memory: word {word_addr} (byte {off})"
+            raise MemoryError(err)
         v = int(value) & 0xFFFFFFFF
         if v & 0x80000000:
             v = v - (1 << 32)
         self.memory[off : off + 4] = struct.pack("<i", int(v))
 
-    def _write_pstr_to_mem(self, base_word_addr, buffer_list):
-        """
-        Write pstr (len + chars-as-words) starting at base_word_addr.
+    def _write_pstr_to_mem(self, base_word_addr: int, buffer_list: list[int]) -> None:
+        """Write pstr (len + chars-as-words) starting at base_word_addr.
+
         If buffer_list is empty write header 0.
         """
         try:
             if not buffer_list:
                 self.write_word(base_word_addr, 0)
                 return
-            L = len(buffer_list)
-            if base_word_addr + 1 + L > self.mem_cells:
-                logging.debug(f"mmio pstr write would overflow memory at {base_word_addr} (len {L}) -> skipped")
+            ln = len(buffer_list)
+            if base_word_addr + 1 + ln > self.mem_cells:
+                logging.debug(
+                    "mmio pstr write would overflow memory at %d (len %d) -> skipped",
+                    base_word_addr,
+                    ln,
+                )
                 return
-            self.write_word(base_word_addr, L)
+            self.write_word(base_word_addr, ln)
             for i, ch in enumerate(buffer_list):
                 self.write_word(base_word_addr + 1 + i, ch & 0xFF)
         except MemoryError as e:
-            logging.debug(f"_write_pstr_to_mem failed: {e}")
+            logging.debug("_write_pstr_to_mem failed: %s", e)
 
-    def mem_read_word(self, word_addr):
+    def mem_read_word(self, word_addr: int) -> int:
+        """Read a word, with MMIO IN behaviour for the mmio_in address."""
         # MMIO IN returns next available char or 0
         if word_addr == self.mmio_in:
             if self.mmio_in_buffer:
@@ -220,11 +295,43 @@ class Datapath:
             return 0
         return self.read_word(word_addr)
 
-    def mem_write_word(self, word_addr, value):
-        """
-        Special MMIO behavior:
-         - mmio_out: append to output_buffer and mmio_out_buffer; write pstr to memory at mmio_out.
-         - mmio_in: nonzero -> append new char to mmio_in_buffer; zero -> consume first char.
+    # break mmio handling into helpers to reduce mem_write_word complexity
+    def _mmio_out_write(self, value: int) -> None:
+        ch = value & 0xFF
+        self.mmio_out_buffer.append(ch)
+        self.output_buffer.append(ch)
+        self.last_interrupt_source = "OUT"
+        ch_repr = chr(ch) if 0 <= ch < 256 else "?"
+        logging.debug("[MMIO OUT] wrote %d -> char: %s", value, ch_repr)
+        self._write_pstr_to_mem(self.mmio_out, self.mmio_out_buffer)
+
+    def _mmio_in_write(self, value: int) -> None:
+        ch = value & 0xFF
+        if getattr(self, "input_closed", False):
+            logging.debug("[MMIO IN] input closed, ignoring incoming char %d", ch)
+            return
+        self.mmio_in_buffer.append(ch)
+        self.mmio_in_cell = ch
+        logging.debug("[MMIO IN] input cell set to %d", ch)
+        self._write_pstr_to_mem(self.mmio_in, self.mmio_in_buffer)
+
+    def _mmio_in_consume(self) -> None:
+        popped = self.mmio_in_buffer.pop(0)
+        logging.debug("[MMIO IN] consumed %d", popped)
+        self._write_pstr_to_mem(self.mmio_in, self.mmio_in_buffer)
+        if popped == 10:  # newline -> close input
+            self.input_closed = True
+            if getattr(self, "input_schedule", None):
+                self.input_schedule = []
+                logging.debug("[MMIO IN] newline -> in closed, schedule cleared")
+
+    def mem_write_word(self, word_addr: int, value: int) -> None:
+        """Implement special MMIO behavior.
+
+        - mmio_out: append to output_buffer and mmio_out_buffer;
+          write pstr to memory at mmio_out.
+        - mmio_in: nonzero -> append new char to mmio_in_buffer;
+          zero -> consume first char.
         """
         try:
             value = int(value) & 0xFFFFFFFF
@@ -233,57 +340,34 @@ class Datapath:
 
         # MMIO OUT
         if word_addr == self.mmio_out:
-            ch = value & 0xFF
-            self.mmio_out_buffer.append(ch)
-            self.output_buffer.append(ch)
-            self.last_interrupt_source = 'OUT'
-            logging.debug(f"[MMIO OUT] wrote {value} -> char: {chr(ch) if 0<=ch<256 else '?'}")
-            # update pstr in memory at mmio_out (best-effort)
-            self._write_pstr_to_mem(self.mmio_out, self.mmio_out_buffer)
+            self._mmio_out_write(value)
             return
 
         # MMIO IN
         if word_addr == self.mmio_in:
             if value != 0:
-                ch = value & 0xFF
-                if getattr(self, "input_closed", False):
-                    logging.debug(f"[MMIO IN] input closed, ignoring incoming char {ch}")
-                    return
-                self.mmio_in_buffer.append(ch)
-                self.mmio_in_cell = ch
-                logging.debug(f"[MMIO IN] input cell set to {ch}")
-                self._write_pstr_to_mem(self.mmio_in, self.mmio_in_buffer)
+                self._mmio_in_write(value)
                 return
-            else:
-                # consume one char
-                if self.mmio_in_buffer:
-                    popped = self.mmio_in_buffer.pop(0)
-                    logging.debug(f"[MMIO IN] consumed {popped}")
-                    self._write_pstr_to_mem(self.mmio_in, self.mmio_in_buffer)
-                    if popped == 10:  # newline -> close input
-                        self.input_closed = True
-                        if getattr(self, "input_schedule", None):
-                            self.input_schedule = []
-                            logging.debug("[MMIO IN] newline consumed -> input closed, schedule cleared")
-                    return
-                else:
-                    # nothing to consume -> ensure header zero
-                    self._write_pstr_to_mem(self.mmio_in, [])
-                    self.mmio_in_cell = 0
-                    return
+            # consume one char
+            if self.mmio_in_buffer:
+                self._mmio_in_consume()
+                return
+            # nothing to consume -> ensure header zero
+            self._write_pstr_to_mem(self.mmio_in, [])
+            self.mmio_in_cell = 0
+            return
 
         try:
             self.write_word(word_addr, value)
         except MemoryError:
-            logging.debug(f"mem_write_word: attempt to write out-of-range word {word_addr}; ignored")
+            logging.debug(
+                "mem_write_word: attempt to write out-of-range word %s; ignored",
+                word_addr,
+            )
 
     # Frame helpers: push_frame and pop_frame operate on stack
-    def push_frame(self, total_locals, num_args):
-        """
-        total_locals: total slots to reserve (including arg slots)
-        num_args: number of arguments the caller pushed (must be <= total_locals)
-        """
-
+    def push_frame(self, total_locals: int, num_args: int) -> None:
+        """Reserve and set up a new frame on the runtime stack."""
         self.frame_stack.append(self.FP)
         # base = start index for locals (args are expected to be at the top of stack)
         base = len(self.runtime_stack) - num_args
@@ -295,7 +379,8 @@ class Datapath:
         if need_len > len(self.runtime_stack):
             self.runtime_stack.extend([0] * (need_len - len(self.runtime_stack)))
 
-    def pop_frame(self):
+    def pop_frame(self) -> None:
+        """Pop current frame and restore previous FP."""
         # truncate stack to FP (drop locals and arguments)
         if self.FP < 0:
             self.FP = 0
@@ -303,55 +388,89 @@ class Datapath:
         # restore previous FP
         self.FP = self.frame_stack.pop() if self.frame_stack else 0
 
-    def schedule_input(self, schedule):
+    def schedule_input(self, schedule: list[tuple[int, str]]) -> None:
+        """Attach an input schedule (list of (tick, char))."""
         self.input_schedule = list(schedule)
-        logging.debug(f"Datapath.schedule_input called, {len(self.input_schedule)} events attached")
+        logging.debug(
+            "Datapath.schedule_input called, %d events attached",
+            len(self.input_schedule),
+        )
 
-    def get_nearest_input_moment(self):
+    def get_nearest_input_moment(self) -> int:
+        """Return tick of next scheduled input or -1 when none available."""
         if len(self.input_schedule) == 0 or getattr(self, "input_closed", False):
             return -1
         return int(self.input_schedule[0][0])
 
 
 class ControlUnit:
-    def __init__(self, dp: Datapath):
+    """Control unit implementing the FETCH-DECODE-EXEC loop for the Datapath."""
+
+    dp: Datapath
+
+    def __init__(self, dp: Datapath) -> None:
+        """Create a ControlUnit bound to `dp`."""
         self.dp = dp
 
-    def _format_instr(self, opcode, arg):
+    def _format_instr(self, opcode: OpCode, arg: int) -> str:
         try:
             return mnemonic(opcode, arg)
         except Exception:
             return f"{opcode.name} {arg}"
 
-    def _mem_at_word(self, word_addr):
+    def _mem_at_word(self, word_addr: int | None) -> int:
         try:
+            if word_addr is None:
+                return 0
             return self.dp.read_word(word_addr)
         except Exception:
             return 0
 
-    def _log_step(self, state, step, tick, pc, addr_word, acc, instr):
+    def _log_step(
+        self,
+        state: str,
+        step: str,
+        tick: int,
+        pc: int,
+        addr_word: int | None,
+        acc: int,
+        instr: str,
+    ) -> None:
         # skip verbose per-step logs in lenient mode to reduce log size
         if getattr(self.dp, "lenient_log", False):
             return
 
         mem_val = self._mem_at_word(addr_word) if addr_word is not None else 0
-        logging.debug(
-            f"STATE: {state:<10} STEP: {step:<15} TICK: {tick:4d} PC: {pc:5d} ADDR: {addr_word if addr_word is not None else 0:5d} "
+        # for keep string lendth
+        left = f"STATE: {state:<10} STEP: {step:<15} TICK: {tick:4d} PC: {pc:5d} "
+        right = (
+            f"ADDR: {addr_word if addr_word is not None else 0:5d} "
             f"MEM[ADDR]: {mem_val:10d} ACC: {acc:10d} C: 0 V: 0\tINSTR: {instr}"
         )
+        logging.debug(left + right)
 
-    def run(self):
+    def run(self) -> tuple[str, int, str]:  # noqa: C901
+        """Execute the datapath until halt/pause or tick limit."""
         dp = self.dp
         while dp.tick < dp.tick_limit:
             # paused check (log a PAUSED step)
             if dp.pause_tick is not None and dp.tick == dp.pause_tick:
-                self._log_step("PAUSED", "PAUSE_CHECK", dp.tick, dp.PC, (dp.PC - dp.code_start)//4, dp.ACC, "pause")
+                self._log_step(
+                    "PAUSED",
+                    "PAUSE_CHECK",
+                    dp.tick,
+                    dp.PC,
+                    (dp.PC - dp.code_start) // 4,
+                    dp.ACC,
+                    "pause",
+                )
                 break
 
             # If there are no more scheduled input events and in-buffer is empty,
             # treat input as closed (EOF). This prevents programs from blocking
             # forever on READ when nothing else will arrive.
-            if dp.get_nearest_input_moment() == -1 and not dp.mmio_in_buffer and not dp.input_closed:
+            no_input = dp.get_nearest_input_moment() == -1 and not dp.mmio_in_buffer and not dp.input_closed
+            if no_input:
                 dp.input_closed = True
                 logging.debug("No more scheduled input and mmio_in_buffer empty -> input closed (EOF)")
 
@@ -365,34 +484,78 @@ class ControlUnit:
                 ch0 = ch[0]
                 dp.mem_write_word(dp.mmio_in, ord(ch0))
                 dp.interrupt_ready = True
-                dp.last_interrupt_source = 'IN'
-                logging.debug(f"[tick {dp.tick}] input arrived: {ch0!r} (source=IN)")
+                dp.last_interrupt_source = "IN"
+                logging.debug("[tick %d] input arrived: %r (source=IN)", dp.tick, ch0)
 
             # handle interrupt (hardwired)
-            if dp.interrupt_ready and dp.interruption_allowed and not dp.in_interruption:
+            interrupt_ready = dp.interrupt_ready
+            interruption_allowed = dp.interruption_allowed
+            in_interruption = dp.in_interruption
+            interrupt_pending = interrupt_ready and interruption_allowed and not in_interruption
+            if interrupt_pending:
                 src = getattr(dp, "last_interrupt_source", None)
                 if src is not None:
-                    logging.debug(f"[tick {dp.tick}] ** INTERRUPT ({src}) -> vector {dp.interruption_vector} **")
+                    logging.debug(
+                        "[tick %d] ** INTERRUPT (%s) -> vector %s **",
+                        dp.tick,
+                        src,
+                        dp.interruption_vector,
+                    )
                 else:
-                    logging.debug(f"[tick {dp.tick}] ** INTERRUPT -> vector {dp.interruption_vector} **")
+                    logging.debug(
+                        "[tick %d] ** INTERRUPT -> vector %s **",
+                        dp.tick,
+                        dp.interruption_vector,
+                    )
                 # Log interruption COMMAND_FETCH step before jumping into handler
-                self._log_step("INTERRUPTION", "COMMAND_FETCH", dp.tick, dp.PC, (dp.PC - dp.code_start)//4, dp.ACC, "interrupt")
+                self._log_step(
+                    "INTERRUPTION",
+                    "COMMAND_FETCH",
+                    dp.tick,
+                    dp.PC,
+                    (dp.PC - dp.code_start) // 4,
+                    dp.ACC,
+                    "interrupt",
+                )
                 self.handle_interrupt()
 
-            # fetch (COMMAND_FETCH)
             try:
-                self._log_step("RUNNING", "COMMAND_FETCH", dp.tick, dp.PC, (dp.PC - dp.code_start)//4, dp.ACC, "fetch")
-                opcode, arg = decode_instr(dp.memory, dp.PC)
+                self._log_step(
+                    "RUNNING",
+                    "COMMAND_FETCH",
+                    dp.tick,
+                    dp.PC,
+                    (dp.PC - dp.code_start) // 4,
+                    dp.ACC,
+                    "fetch",
+                )
+                # decode_instr expects bytes; dp.memory is bytearray -> convert
+                opcode, arg = decode_instr(bytes(dp.memory), dp.PC)
             except Exception:
                 logging.debug("PC out of range / decode error -> HALT")
                 break
 
             # operand-fetch step
             instr_str = self._format_instr(opcode, arg)
-            self._log_step("RUNNING", "OPERAND_FETCH", dp.tick, dp.PC, (dp.PC - dp.code_start)//4, dp.ACC, instr_str)
+            self._log_step(
+                "RUNNING",
+                "OPERAND_FETCH",
+                dp.tick,
+                dp.PC,
+                (dp.PC - dp.code_start) // 4,
+                dp.ACC,
+                instr_str,
+            )
 
             if not getattr(dp, "lenient_log", False):
-                logging.debug(f"Tick {dp.tick} PC {dp.PC}: {opcode.name} {arg} ACC={dp.ACC}")
+                logging.debug(
+                    "Tick %d PC %d: %s %s ACC=%s",
+                    dp.tick,
+                    dp.PC,
+                    opcode.name,
+                    arg,
+                    dp.ACC,
+                )
 
             dp.PC += INSTR_SIZE
 
@@ -400,7 +563,15 @@ class ControlUnit:
             self.exec(opcode, arg)
 
             # execution step log (after exec)
-            self._log_step("RUNNING", "EXECUTION", dp.tick, dp.PC, (dp.PC - dp.code_start)//4, dp.ACC, instr_str)
+            self._log_step(
+                "RUNNING",
+                "EXECUTION",
+                dp.tick,
+                dp.PC,
+                (dp.PC - dp.code_start) // 4,
+                dp.ACC,
+                instr_str,
+            )
 
             dp.tick += 1
 
@@ -408,8 +579,8 @@ class ControlUnit:
                 logging.debug("HALT encountered")
                 break
 
-        # build ascii output: prefer output_buffer; if empty fall back to mmio_out_buffer
-        out_chars = []
+        # build ascii output: prefer output_buffer; if empty fallback to mmio_out_buffer
+        out_chars: list[str] = []
         source_buf = dp.output_buffer if dp.output_buffer else dp.mmio_out_buffer
         for v in source_buf:
             out_chars.append(chr(v) if 0 <= v < 256 else "?")
@@ -418,7 +589,7 @@ class ControlUnit:
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 self._dump_memory_to_file("memory_dump_nice.txt")
         except Exception as e:
-            logging.debug(f"Failed to write memory dump: {e}")
+            logging.debug("Failed to write memory dump: %s", e)
 
         return (
             "".join(out_chars),
@@ -426,7 +597,11 @@ class ControlUnit:
             ("paused" if (dp.pause_tick is not None and dp.tick == dp.pause_tick) else "stopped"),
         )
 
-    def handle_interrupt(self):
+    def handle_interrupt(self) -> None:
+        """Handle an interrupt by jumping to the configured vector.
+
+        Save return state so RET/IRET can restore execution.
+        """
         dp = self.dp
         dp.interrupt_return_state = (dp.PC, dp.ACC)
         dp.in_interruption = True
@@ -438,10 +613,14 @@ class ControlUnit:
         # interruption_vector is stored as absolute PC already
         dp.PC = int(dp.interruption_vector)
 
-    def exec(self, opcode, arg):
+    def exec(self, opcode: OpCode, arg: int) -> None:  # noqa: C901
+        """Execute a single instruction (hardwired control unit).
+
+        This is intentionally an explicit if/elif chain mirroring the ISA.
+        """
         dp = self.dp
 
-        def to_s32(x):
+        def to_s32(x: int) -> int:
             x = int(x) & 0xFFFFFFFF
             return x if x < 0x80000000 else x - 0x100000000
 
@@ -509,28 +688,27 @@ class ControlUnit:
             if dp.call_stack:
                 dp.PC = dp.call_stack.pop()
                 return
-            else:
-                # returning from interrupt (if in interruption)
-                if dp.in_interruption and dp.interrupt_return_state:
-                    dp.PC, dp.ACC = dp.interrupt_return_state
-                    dp.in_interruption = False
-                    dp.interruption_allowed = True
-                    dp.interrupt_return_state = None
-                    return
-                dp.PC = len(dp.memory)
+            # returning from interrupt (if in interruption)
+            if dp.in_interruption and dp.interrupt_return_state:
+                dp.PC, dp.ACC = dp.interrupt_return_state
+                dp.in_interruption = False
+                dp.interruption_allowed = True
+                dp.interrupt_return_state = None
                 return
+            dp.PC = len(dp.memory)
+            return
         if opcode == OpCode.SETVEC:
             # store absolute PC for the vector (arg is code-relative offset)
             dp.interruption_vector = dp.code_start + arg
-            logging.debug(f"SETVEC -> {dp.interruption_vector}")
+            logging.debug("SETVEC -> %s", dp.interruption_vector)
             return
         if opcode == OpCode.EI:
             dp.interruption_allowed = True
-            logging.debug(f"EI -> interrupts enabled")
+            logging.debug("EI -> interrupts enabled")
             return
         if opcode == OpCode.DI:
             dp.interruption_allowed = False
-            logging.debug(f"DI -> interrupts disabled")
+            logging.debug("DI -> interrupts disabled")
             return
         if opcode == OpCode.IRET:
             if dp.interrupt_return_state:
@@ -555,14 +733,14 @@ class ControlUnit:
                 else:
                     dp.ACC = 0
             else:
-                logging.debug(f"BINOP_POP: unknown code {code}")
+                logging.debug("BINOP_POP: unknown code %s", code)
             return
 
         if opcode == OpCode.CMP_POP:
             v = dp.runtime_stack.pop() if dp.runtime_stack else 0
             code = int(arg)
 
-            def as_signed(x):
+            def as_signed(x: int) -> int:
                 x &= 0xFFFFFFFF
                 return x if x < 0x80000000 else x - 0x100000000
 
@@ -582,7 +760,7 @@ class ControlUnit:
             elif code == 6:
                 res = 1 if lv >= rv else 0
             else:
-                logging.debug(f"CMP_POP: unknown code {code}")
+                logging.debug("CMP_POP: unknown code %s", code)
             dp.ACC = res
             return
 
@@ -623,18 +801,13 @@ class ControlUnit:
 
             if ai is not None and 0 <= ai < dp.string_pool_cells:
                 try:
-                    L = dp.read_word(ai)
+                    ln = dp.read_word(ai)
                 except Exception:
-                    L = -1
-                if (
-                    isinstance(L, int)
-                    and L > 0
-                    and L < 100000
-                    and (ai + 1 + L) * 4 <= dp.code_start
-                ):
+                    ln = -1
+                if isinstance(ln, int) and ln > 0 and ln < 100000 and (ai + 1 + ln) * 4 <= dp.code_start:
                     ok = True
-                    chars = []
-                    for i in range(1, L + 1):
+                    chars: list[int] = []
+                    for i in range(1, ln + 1):
                         ch_code = dp.read_word(ai + i) & 0xFF
                         if ch_code in (9, 10, 13) or 32 <= ch_code <= 126:
                             chars.append(ch_code)
@@ -642,7 +815,7 @@ class ControlUnit:
                             ok = False
                             break
                     if ok:
-                        logging.debug(f"PRINT: Detected pstr at {ai} len={L}")
+                        logging.debug("PRINT: Detected pstr at %s len=%s", ai, ln)
                         for ch_code in chars:
                             dp.mem_write_word(dp.mmio_out, ch_code)
                         return
@@ -651,7 +824,7 @@ class ControlUnit:
             if x & 0x80000000:
                 x = -((~x + 1) & 0xFFFFFFFF)
             s = str(x)
-            logging.debug(f"PRINT: numeric -> {s}")
+            logging.debug("PRINT: numeric -> %s", s)
             for ch in s:
                 dp.mem_write_word(dp.mmio_out, ord(ch))
             return
@@ -663,77 +836,79 @@ class ControlUnit:
                     logging.debug("READ: no data -> retrying next tick")
                     dp.PC -= INSTR_SIZE
                     return
-                else:
-                    logging.debug("READ: no data -> returning 0 (EOF or closed)")
-                    return
-            else:
-                try:
-                    chrepr = chr(dp.ACC)
-                except Exception:
-                    chrepr = repr(dp.ACC)
-                logging.debug(f"READ: got {dp.ACC} ('{chrepr}')")
-                dp.mem_write_word(dp.mmio_in, 0)
+                logging.debug("READ: no data -> returning 0 (EOF or closed)")
                 return
-        logging.debug(f"Unhandled opcode: {opcode}")
+            try:
+                chrepr = chr(dp.ACC)
+            except Exception:
+                chrepr = repr(dp.ACC)
+            logging.debug("READ: got %s ('%s')", dp.ACC, chrepr)
+            dp.mem_write_word(dp.mmio_in, 0)
+            return
+        logging.debug("Unhandled opcode: %s", opcode)
 
-    def _dump_memory_to_file(self, path):
+    # split memory dump into parts to reduce complexity of one function
+    def _dump_data_section(self, f: TextIO, dp: Datapath) -> None:
+        data_words = dp.code_start // 4
+        f.write("=== DATA (words) ===\n")
+        for i in range(data_words):
+            off = i * 4
+            w_bytes = dp.memory[off : off + 4]
+            if len(w_bytes) < 4:
+                break
+            unsigned = struct.unpack("<I", w_bytes)[0]
+            signed = struct.unpack("<i", w_bytes)[0]
+            txt = f"{i:08d}: {unsigned:08X}  ({signed})"
+            ln = signed
+            if 0 <= ln and (i + 1 + ln) * 4 <= dp.code_start and ln < 100000:
+                chars: list[str] = []
+                ok = True
+                for j in range(ln):
+                    offj = (i + 1 + j) * 4
+                    if offj + 4 > dp.code_start:
+                        ok = False
+                        break
+                    ch = struct.unpack("<I", dp.memory[offj : offj + 4])[0] & 0xFF
+                    chars.append(chr(ch) if 32 <= ch < 127 else f"\\x{ch:02X}")
+                if ok:
+                    s = "".join(chars)
+                    txt += f"   (pstr len={ln} '{s}')"
+            f.write(txt + "\n")
+
+    def _dump_code_section(self, f: TextIO, dp: Datapath) -> None:
+        f.write("\n=== CODE (instructions) ===\n")
+        pc = dp.code_start
+        code_end = dp.code_start + dp.code_len
+        while pc < code_end:
+            try:
+                opcode, arg = decode_instr(bytes(dp.memory), pc)
+                instr_bytes = dp.memory[pc : pc + INSTR_SIZE]
+                hexbytes = instr_bytes.hex().upper()
+                try:
+                    mnem = mnemonic(opcode, arg)
+                except Exception:
+                    mnem = f"{opcode.name} {arg}"
+                f.write(f"{pc:08d}: {hexbytes:<12} - {mnem}\n")
+            except Exception as e:
+                rem = dp.memory[pc:code_end].hex().upper()
+                f.write(f"{pc:08d}: {rem} - <incomplete or decode error: {e}>\n")
+                break
+            pc += INSTR_SIZE
+
+    def _dump_memory_to_file(self, path: str) -> None:
         dp = self.dp
         with open(path, "w", encoding="utf-8") as f:
             f.write("=== MEMORY DUMP ===\n")
             f.write(f"mem_cells: {dp.mem_cells}  mem_bytes: {len(dp.memory)}\n")
             f.write(f"data_bytes_len (code_start): {dp.code_start}  code_bytes_len: {dp.code_len}\n\n")
-
-            # DATA section
-            data_words = dp.code_start // 4
-            f.write("=== DATA (words) ===\n")
-            for i in range(data_words):
-                off = i * 4
-                w_bytes = dp.memory[off : off + 4]
-                if len(w_bytes) < 4:
-                    break
-                unsigned = struct.unpack("<I", w_bytes)[0]
-                signed = struct.unpack("<i", w_bytes)[0]
-                txt = f"{i:08d}: {unsigned:08X}  ({signed})"
-                L = signed
-                if 0 <= L and (i + 1 + L) * 4 <= dp.code_start and L < 100000:
-                    chars = []
-                    ok = True
-                    for j in range(L):
-                        offj = (i + 1 + j) * 4
-                        if offj + 4 > dp.code_start:
-                            ok = False
-                            break
-                        ch = struct.unpack("<I", dp.memory[offj : offj + 4])[0] & 0xFF
-                        chars.append(chr(ch) if 32 <= ch < 127 else f"\\x{ch:02X}")
-                    if ok:
-                        s = "".join(chars)
-                        txt += f"   (pstr len={L} '{s}')"
-                f.write(txt + "\n")
-
-            f.write("\n=== CODE (instructions) ===\n")
-            pc = dp.code_start
-            code_end = dp.code_start + dp.code_len
-            while pc < code_end:
-                try:
-                    opcode, arg = decode_instr(dp.memory, pc)
-                    instr_bytes = dp.memory[pc : pc + INSTR_SIZE]
-                    hexbytes = instr_bytes.hex().upper()
-                    try:
-                        mnem = mnemonic(opcode, arg)
-                    except Exception:
-                        mnem = f"{opcode.name} {arg}"
-                    f.write(f"{pc:08d}: {hexbytes:<12} - {mnem}\n")
-                except Exception as e:
-                    rem = dp.memory[pc:code_end].hex().upper()
-                    f.write(f"{pc:08d}: {rem} - <incomplete or decode error: {e}>\n")
-                    break
-                pc += INSTR_SIZE
-
+            self._dump_data_section(f, dp)
+            self._dump_code_section(f, dp)
             f.write("\n=== END DUMP ===\n")
 
 
 # ---------- Public API ----------
-def run_bytes(code_bytes, data_bytes, config):
+def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | None) -> tuple[str, int, str]:
+    """Run VM on given bytes and config and return (stdout, ticks, state)."""
     cfg = dict(config) if config is not None else {}
     mmio_in = cfg.get("mmio_in") if "mmio_in" in cfg else 0xFFF0
     mmio_in = 0xFFF0 if mmio_in is None else mmio_in
@@ -772,14 +947,14 @@ def run_bytes(code_bytes, data_bytes, config):
                     si = struct.unpack("<i", dp.memory[off : off + 4])[0]
                     f.write(f"{i:08d}: {w:08X}  ({si})\n")
     except Exception as e:
-        logging.debug(f"Failed to write memory_dump.txt: {e}")
+        logging.debug("Failed to write memory_dump.txt: %s", e)
 
     # if debug -> write out.bin / out.hex (from original code_bytes)
     try:
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             _write_debug_out_files(code_bytes)
     except Exception as e:
-        logging.debug(f"Failed to write debug out files: {e}")
+        logging.debug("Failed to write debug out files: %s", e)
 
     return out, ticks, state
 
@@ -787,15 +962,22 @@ def run_bytes(code_bytes, data_bytes, config):
 # ---------- CLI ----------
 if __name__ == "__main__":
     import argparse
-    from parser import tokenize, parse, Compiler
+    from parser import Compiler, parse, tokenize
 
     ap = argparse.ArgumentParser()
     ap.add_argument("program", help="program.lisp or program.bin")
     ap.add_argument("--config", help="path to yaml config", default=None)
-    ap.add_argument("--input-schedule", help="input schedule file (tick char per line)", default=None)
-    ap.add_argument("--debug", action="store_true", help="enable debug logging to logfile")
-    ap.add_argument("--logfile", default=LOGFILE, help="path to processor log")
-    ap.add_argument("--console", action="store_true", help="also echo logs to console")
+    ap.add_argument(
+        "--input-schedule",
+        help="input schedule file (tick char per line)",
+        default=None,
+    )
+    help_debug = "enable debug logging to logfile"
+    help_logfile = "path to processor log"
+    help_console = "also echo logs to console"
+    ap.add_argument("--debug", action="store_true", help=help_debug)
+    ap.add_argument("--logfile", default=LOGFILE, help=help_logfile)
+    ap.add_argument("--console", action="store_true", help=help_console)
     args = ap.parse_args()
 
     # initialize logging according to CLI flags
@@ -808,8 +990,12 @@ if __name__ == "__main__":
         sys.exit(2)
 
     # read input schedule if exists
-    def parse_schedule_file(path):
-        result = []
+    def parse_schedule_file(path: str) -> list[tuple[int, str]]:
+        """Parse schedule file with lines "<tick> <char>".
+
+        Returns list of (tick, char).
+        """
+        result: list[tuple[int, str]] = []
         with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -818,8 +1004,9 @@ if __name__ == "__main__":
                 parts = line.split(None, 1)
                 try:
                     tick = int(parts[0])
-                except Exception:
-                    raise ValueError(f"Bad schedule line (bad tick): {line!r}")
+                except Exception as e:
+                    err = f"Bad schedule line (bad tick): {line!r}"
+                    raise ValueError(err) from e
                 token = parts[1] if len(parts) > 1 else " "
                 try:
                     token_unescaped = bytes(token, "utf-8").decode("unicode_escape")
@@ -829,15 +1016,19 @@ if __name__ == "__main__":
                     ch = " "
                 else:
                     if len(token_unescaped) > 1:
-                        logging.debug(f"Schedule token {token!r} decoded to {token_unescaped!r} (len>1); using first char")
+                        logging.debug(
+                            "Schedule token %r decoded to %r (len>1); using first char",
+                            token,
+                            token_unescaped,
+                        )
                     ch = token_unescaped[0]
                 result.append((tick, ch))
         return result
 
-    sched = []
-    if args.input_schedule and os.path.exists(args.input_schedule):
+    sched: list[tuple[int, str]] = []
+    if args.input_schedule and Path(args.input_schedule).exists():
         sched = parse_schedule_file(args.input_schedule)
-        logging.debug(f"CLI: parsed schedule from {args.input_schedule}: {sched!r}")
+        logging.debug("CLI: parsed schedule from %s: %r", args.input_schedule, sched)
 
     if args.program.endswith(".lisp"):
         src = open(args.program, encoding="utf-8").read()
@@ -850,9 +1041,10 @@ if __name__ == "__main__":
     else:
         code_bytes = open(args.program, "rb").read()
         data_path = args.program + ".data"
-        data_bytes = open(data_path, "rb").read() if os.path.exists(data_path) else b""
+        data_bytes = open(data_path, "rb").read() if Path(data_path).exists() else b""
 
-    # Decide Datapath creation: if schedule explicitly provided, create Datapath with schedule and run
+    # Decide Datapath creation: if schedule explicitly provided,
+    # create Datapath with schedule and run
     if sched:
         vm_cfg = cfg.copy()
         mmio_in = vm_cfg["mmio_in"] if vm_cfg.get("mmio_in") is not None else 0xFFF0
@@ -880,7 +1072,7 @@ if __name__ == "__main__":
             try:
                 _write_debug_out_files(code_bytes)
             except Exception as e:
-                logging.debug(f"Failed to write debug out files (CLI sched): {e}")
+                logging.debug("Failed to write debug out files (CLI sched): %s", e)
     else:
         out, ticks, state = run_bytes(code_bytes, data_bytes, cfg)
 

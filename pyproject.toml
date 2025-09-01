@@ -1,0 +1,68 @@
+[tool.poetry]
+name = "archlab4"
+version = "0.1.0"
+description = "Architecture lab — VM + translator for the course."
+authors = ["Your Name <you@example.com>"]
+license = "BSD"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.group.dev.dependencies]
+coverage = "^7.2.7"
+mypy = "^1.4.1"
+pytest = "^7.4.0"
+pytest-golden = "^0.2.2"
+ruff = "^0.1.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+enable_assertion_pass_hook = true
+addopts = "--doctest-modules"
+log_format = "%(levelname)-7s %(module)s:%(funcName)-13s %(message)s"
+
+[tool.ruff]
+line-length = 120
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "F", "E", "W", "N", "I", "C90", "UP", "ERA", "YTT", "ASYNC", "A",
+    "COM", "FA", "ICN", "INP", "T20", "PT", "Q", "RET", "PTH", "PD",
+    "TRY", "RUF",
+]
+
+ignore = [
+    "COM812",
+    "E501",
+    "T201",
+    "RUF002",
+    "RUF003",
+    "PTH123",
+    "PTH118",
+    "UP032",
+    "PTH103",
+    "PTH120",
+    "PTH100",
+]
+
+unfixable = [
+    "ERA001",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 9
+
+# mypy — strict settings as required by the assignment
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+# isort config belongs to tool.isort (isort supports `profile = "black"`)
+[tool.isort]
+profile = "black"
