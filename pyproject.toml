@@ -58,11 +58,9 @@ unfixable = [
 [tool.ruff.lint.mccabe]
 max-complexity = 9
 
-# mypy — strict settings as required by the assignment
 [tool.mypy]
 python_version = "3.11"
 strict = true
 
-# isort config belongs to tool.isort (isort supports `profile = "black"`)
 [tool.isort]
 profile = "black"
