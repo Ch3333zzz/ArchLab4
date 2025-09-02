@@ -34,7 +34,7 @@ TOKEN_RE = re.compile(
     """,
     re.VERBOSE,
 )
-
+FORBIDDEN_FOR_USER = {"push", "pop", "ei", "di", "halt"}
 
 def tokenize(s: str) -> list[str]:
     """Compile regexp, find matches and return list of tokens (skip comments)."""
@@ -249,6 +249,9 @@ class Compiler:
         if len(node) < 3:
             raise RuntimeError("malformed defun: " + repr(node))
         _, name, args, *body = node
+        if isinstance(name, str) and name.lower() in FORBIDDEN_FOR_USER:
+            err = f"function name '{name}' is reserved and not allowed"
+            raise RuntimeError(err)
         addr = self.pc  # function address
         self.labels[name] = addr
 
@@ -467,6 +470,11 @@ class Compiler:
             return
 
         head = expr[0]
+
+        if isinstance(head, str):
+                if head.lower() in FORBIDDEN_FOR_USER:
+                    err = f"these ops are emitted by the compiler automatically."
+                    raise RuntimeError(err)
 
         handlers: dict[str, Callable[[list[Any]], None]] = {
             "setq": self._compile_setq,
