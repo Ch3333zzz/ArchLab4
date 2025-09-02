@@ -22,38 +22,27 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     """Configure root logger to write to `logfile`.
 
     If debug=True set DEBUG level. If console=True also echo logs to stdout.
-
-    IMPORTANT: by default (debug=False) logging is effectively disabled
-    (root level = CRITICAL) so normal runs produce no logging output.
     """
     root = logging.getLogger()
-    # remove existing handlers
     for h in list(root.handlers):
         root.removeHandler(h)
-
     lvl = logging.DEBUG if debug else logging.CRITICAL
     root.setLevel(lvl)
-
     if debug:
-        # file handler (write debug logs only when debug=True)
         fmt = "%(levelname)-5s %(name)s:%(filename)s:%(lineno)d %(message)s"
         fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
         fh.setLevel(lvl)
         fh.setFormatter(logging.Formatter(fmt))
         root.addHandler(fh)
-
         if console:
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(lvl)
             ch.setFormatter(logging.Formatter("%(levelname)5s %(message)s"))
             root.addHandler(ch)
 
-    return
-
 
 # --- debug output helpers (split out to reduce complexity) ---
 def _flush_logging_handlers() -> None:
-    """Flush and close logging handlers."""
     try:
         for h in list(logging.getLogger().handlers):
             try:
@@ -66,7 +55,6 @@ def _flush_logging_handlers() -> None:
 
 
 def _write_out_bin(code_bytes: bytes) -> None:
-    """Write raw binary out.bin."""
     try:
         with open("out.bin", "wb") as f:
             f.write(code_bytes)
@@ -75,7 +63,6 @@ def _write_out_bin(code_bytes: bytes) -> None:
 
 
 def _write_out_hex(code_bytes: bytes) -> None:
-    """Produce text disassembly (out.hex) from code_bytes."""
     try:
         code_hex_lines: list[str] = []
         pc = 0
@@ -103,10 +90,6 @@ def _write_out_hex(code_bytes: bytes) -> None:
 
 
 def _write_debug_out_files(code_bytes: bytes) -> None:
-    """When debug logging is on, write out.bin, out.hex.
-
-    Flush logging handlers first to ensure processor.log is complete.
-    """
     _flush_logging_handlers()
     _write_out_bin(code_bytes)
     _write_out_hex(code_bytes)
@@ -130,8 +113,19 @@ class Datapath:
 
     PC: int
     ACC: int
-    runtime_stack: list[int]
-    call_stack: list[int]
+
+    # runtime-stack
+    runtime_base: int
+    runtime_len: int
+    SP: int  # physical next-free word index for runtime stack (word index)
+    FP: int  # logical frame pointer (index into logical runtime stack)
+    # frame-stack
+    frame_stack_cells: int
+    FSP: int  # physical next-free index for frame-stack (word index)
+    # call-stack
+    call_stack_cells: int
+    CP: int  # physical next-free index for call-stack (word index)
+
     tick: int
     interrupt_ready: bool
     interruption_allowed: bool
@@ -150,9 +144,6 @@ class Datapath:
     pause_tick: int | None
     last_interrupt_source: str | None
 
-    FP: int
-    frame_stack: list[int]
-
     def __init__(
         self,
         code_bytes: bytes,
@@ -163,6 +154,8 @@ class Datapath:
         tick_limit: int = 100000,
         pause_tick: int | None = None,
         string_pool_cells: int = 1024,
+        call_stack_cells: int = 1024,
+        frame_stack_cells: int = 256,
         lenient_log: bool = False,
     ) -> None:
         """Initialize Datapath state and memory layout."""
@@ -188,28 +181,49 @@ class Datapath:
         # lenient logging flag
         self.lenient_log = bool(lenient_log)
 
-        # warn if data uses more words than pool
-        data_words = data_len // 4
-        if data_words > self.string_pool_cells:
-            # split becouse of ruff
-            part1 = f"Warning: data section uses {data_words} words but string_pool_cells={self.string_pool_cells}."
-            part2 = " Some static strings may live outside the pool and won't be treated as pstr by PRINT."
-            logging.debug(part1 + part2)
-
         # write code bytes right after data
         code_len = len(self.code_bytes)
         if data_len + code_len > self.mem_bytes:
             err = "Code and data don't fit into memory"
             raise MemoryError(err)
-        self.code_start = data_len  # byte offset where code begins
+        self.code_start = data_len
         self.memory[self.code_start : self.code_start + code_len] = self.code_bytes
         self.code_len = code_len
 
-        # initialize registers/state
+        # registers/state
         self.PC = self.code_start
         self.ACC = 0
-        self.runtime_stack = []
-        self.call_stack = []
+
+        # reserve areas at top for frame-stack and call-stack (words)
+        self.call_stack_cells = int(call_stack_cells)
+        if self.call_stack_cells < 1:
+            self.call_stack_cells = 1
+        self.frame_stack_cells = int(frame_stack_cells)
+        if self.frame_stack_cells < 0:
+            self.frame_stack_cells = 0
+
+        top_reserved = self.call_stack_cells + self.frame_stack_cells
+        if top_reserved >= self.mem_cells:
+            err = "Not enough memory to reserve stacks"
+            raise MemoryError(err)
+
+        # runtime_base is the first word after data up to top_reserved
+        self.runtime_base = self.mem_cells - top_reserved
+
+        # runtime-stack initially empty
+        self.runtime_len = 0
+        self.SP = self.runtime_base  # physical next-free index
+        self.FP = 0  # logical frame pointer
+
+        # frame-stack pointer (physical next-free index)
+        # frame-stack area starts at runtime_base and has frame_stack_cells words
+        # empty FSP == runtime_base + frame_stack_cells
+        self.FSP = self.runtime_base + self.frame_stack_cells
+
+        # call-stack pointer (physical next-free index at very top)
+        self.CP = int(self.mem_cells)
+
+        # ticks / interrupts / mmio
         self.tick = 0
         self.interrupt_ready = False
         self.interruption_allowed = True
@@ -217,22 +231,16 @@ class Datapath:
         self.in_interruption = False
         self.interrupt_return_state = None
         self.input_schedule = []
-        # MMIO
         self.input_closed = False
         self.mmio_in = mmio_in
         self.mmio_out = mmio_out
-        # MMIO buffers for pstr semantics
         self.mmio_in_buffer = []
         self.mmio_out_buffer = []
         self.mmio_in_cell = 0
         self.output_buffer = []
         self.tick_limit = tick_limit
         self.pause_tick = pause_tick
-        self.last_interrupt_source = None  # 'IN' or 'OUT'
-
-        # frame pointer and frame stack
-        self.FP = 0
-        self.frame_stack = []
+        self.last_interrupt_source = None
 
     # helpers to read/write 4-byte words in little-endian
     def _word_byte_offset(self, word_addr: int) -> int:
@@ -246,7 +254,6 @@ class Datapath:
         off = self._word_byte_offset(word_addr)
         if off < 0 or off + 4 > len(self.memory):
             return 0
-        # use int.from_bytes for clearer typing
         return int.from_bytes(self.memory[off : off + 4], byteorder="little", signed=True)
 
     def write_word(self, word_addr: int, value: int) -> None:
@@ -288,7 +295,6 @@ class Datapath:
 
     def mem_read_word(self, word_addr: int) -> int:
         """Read a word, with MMIO IN behaviour for the mmio_in address."""
-        # MMIO IN returns next available char or 0
         if word_addr == self.mmio_in:
             if self.mmio_in_buffer:
                 return int(self.mmio_in_buffer[0])
@@ -301,7 +307,10 @@ class Datapath:
         self.mmio_out_buffer.append(ch)
         self.output_buffer.append(ch)
         self.last_interrupt_source = "OUT"
-        ch_repr = chr(ch) if 0 <= ch < 256 else "?"
+        try:
+            ch_repr = chr(ch) if 0 <= ch < 256 else "?"
+        except Exception:
+            ch_repr = "?"
         logging.debug("[MMIO OUT] wrote %d -> char: %s", value, ch_repr)
         self._write_pstr_to_mem(self.mmio_out, self.mmio_out_buffer)
 
@@ -365,28 +374,150 @@ class Datapath:
                 word_addr,
             )
 
-    # Frame helpers: push_frame and pop_frame operate on stack
+    # --- runtime-stack helpers (values/locals/args) ---
+    def _phys_addr_for_logical_index(self, logical_idx: int) -> int:
+        """Map logical runtime index -> physical word address."""
+        return int(self.runtime_base - 1 - logical_idx)
+
+    def mem_push(self, value: int) -> None:
+        """Push a signed 32-bit word onto the runtime stack (stack in memory)."""
+        try:
+            v = int(value) & 0xFFFFFFFF
+        except Exception:
+            v = 0
+        if v & 0x80000000:
+            v_signed = v - (1 << 32)
+        else:
+            v_signed = v
+        new_len = self.runtime_len + 1
+        new_sp = self.runtime_base - new_len
+        # Prevent overlap with frame-stack and call-stack: new_sp must be < FSP
+        if new_sp < 0 or new_sp >= self.mem_cells or not (new_sp < self.FSP):
+            logging.debug("mem_push: stack overflow or collision -> new_sp=%s FSP=%s; push ignored", new_sp, self.FSP)
+            return
+        self.runtime_len = new_len
+        self.SP = new_sp
+        try:
+            self.write_word(self.SP, v_signed)
+        except MemoryError:
+            logging.debug("mem_push: write out of range at %d", self.SP)
+
+    def mem_pop(self) -> int:
+        """Pop a word from the runtime stack. Return 0 on underflow."""
+        if self.runtime_len == 0:
+            logging.debug("mem_pop: stack underflow -> returning 0")
+            return 0
+        try:
+            v = self.read_word(self.SP)
+        except Exception:
+            v = 0
+        # shrink
+        self.runtime_len -= 1
+        self.SP = self.runtime_base - self.runtime_len
+        return int(v)
+
+    # --- frame-stack helpers (saved FP values) ---
+    def frame_push(self, value: int) -> None:
+        """Push a word onto the frame-stack (FSP decreases)."""
+        try:
+            v = int(value) & 0xFFFFFFFF
+        except Exception:
+            v = 0
+        if v & 0x80000000:
+            v_signed = v - (1 << 32)
+        else:
+            v_signed = v
+        new_fsp = self.FSP - 1
+        # Prevent overlap with runtime-stack: new_fsp must be > SP
+        if new_fsp < 0 or new_fsp >= self.mem_cells or not (new_fsp > self.SP):
+            logging.debug("frame_push: frame-stack overflow or collision -> new_fsp=%s SP=%s; push ignored", new_fsp, self.SP)
+            return
+        self.FSP = new_fsp
+        try:
+            self.write_word(self.FSP, v_signed)
+        except MemoryError:
+            logging.debug("frame_push: write out of range at %d", self.FSP)
+
+    def frame_pop(self) -> int:
+        """Pop a word from the frame-stack. Return 0 on underflow."""
+        # empty when FSP == runtime_base + frame_stack_cells
+        empty_fsp = self.runtime_base + self.frame_stack_cells
+        if self.FSP >= empty_fsp:
+            logging.debug("frame_pop: frame-stack underflow -> returning 0")
+            return 0
+        try:
+            v = self.read_word(self.FSP)
+        except Exception:
+            v = 0
+        self.FSP += 1
+        return int(v)
+
+    # --- call-stack helpers (return-address stack) ---
+    def call_push(self, value: int) -> None:
+        """Push a word onto the call stack (CP decreases)."""
+        try:
+            v = int(value) & 0xFFFFFFFF
+        except Exception:
+            v = 0
+        if v & 0x80000000:
+            v_signed = v - (1 << 32)
+        else:
+            v_signed = v
+        new_cp = self.CP - 1
+        # Prevent overlap: new_cp must be > FSP (physical). If new_cp <= FSP -> collision
+        if new_cp < 0 or new_cp >= self.mem_cells or not (new_cp > self.FSP):
+            logging.debug("call_push: call-stack overflow or collision -> new_cp=%s FSP=%s; push ignored", new_cp, self.FSP)
+            return
+        self.CP = new_cp
+        try:
+            self.write_word(self.CP, v_signed)
+        except MemoryError:
+            logging.debug("call_push: write out of range at %d", self.CP)
+
+    def call_pop(self) -> int:
+        """Pop a word from the call stack. Return 0 on underflow."""
+        if self.CP >= self.mem_cells:
+            logging.debug("call_pop: call-stack underflow -> returning 0")
+            return 0
+        try:
+            v = self.read_word(self.CP)
+        except Exception:
+            v = 0
+        self.CP += 1
+        return int(v)
+
+    # Frame helpers: push_frame and pop_frame operate on runtime-stack and frame-stack in memory
     def push_frame(self, total_locals: int, num_args: int) -> None:
-        """Reserve and set up a new frame on the runtime stack."""
-        self.frame_stack.append(self.FP)
+        """Reserve and set up a new frame on the runtime stack.
+
+        Old FP is stored on the frame-stack (in memory).
+        The compiler's original convention is preserved: FP = len(runtime_stack) - num_args.
+        """
+        # save previous FP on frame-stack (in memory)
+        self.frame_push(self.FP)
         # base = start index for locals (args are expected to be at the top of stack)
-        base = len(self.runtime_stack) - num_args
+        base = self.runtime_len - num_args
         if base < 0:
             base = 0
         self.FP = base
         # ensure stack has space for all locals
         need_len = self.FP + total_locals
-        if need_len > len(self.runtime_stack):
-            self.runtime_stack.extend([0] * (need_len - len(self.runtime_stack)))
+        while self.runtime_len < need_len:
+            self.mem_push(0)
 
     def pop_frame(self) -> None:
         """Pop current frame and restore previous FP."""
         # truncate stack to FP (drop locals and arguments)
         if self.FP < 0:
             self.FP = 0
-        self.runtime_stack = self.runtime_stack[: self.FP]
-        # restore previous FP
-        self.FP = self.frame_stack.pop() if self.frame_stack else 0
+        while self.runtime_len > self.FP:
+            self.mem_pop()
+        # restore previous FP from frame-stack (in memory)
+        prev = self.frame_pop()
+        try:
+            self.FP = int(prev)
+        except Exception:
+            self.FP = 0
 
     def schedule_input(self, schedule: list[tuple[int, str]]) -> None:
         """Attach an input schedule (list of (tick, char))."""
@@ -441,11 +572,11 @@ class ControlUnit:
             return
 
         mem_val = self._mem_at_word(addr_word) if addr_word is not None else 0
-        # for keep string lendth
         left = f"STATE: {state:<10} STEP: {step:<15} TICK: {tick:4d} PC: {pc:5d} "
         right = (
             f"ADDR: {addr_word if addr_word is not None else 0:5d} "
-            f"MEM[ADDR]: {mem_val:10d} ACC: {acc:10d} C: 0 V: 0\tINSTR: {instr}"
+            f"MEM[ADDR]: {mem_val:10d} ACC: {acc:10d} SP: {self.dp.SP:5d} "
+            f"FSP: {self.dp.FSP:5d} CP: {self.dp.CP:5d} C: 0 V: 0\tINSTR: {instr}"
         )
         logging.debug(left + right)
 
@@ -549,12 +680,15 @@ class ControlUnit:
 
             if not getattr(dp, "lenient_log", False):
                 logging.debug(
-                    "Tick %d PC %d: %s %s ACC=%s",
+                    "Tick %d PC %d: %s %s ACC=%s SP=%s FSP=%s CP=%s",
                     dp.tick,
                     dp.PC,
                     opcode.name,
                     arg,
                     dp.ACC,
+                    dp.SP,
+                    dp.FSP,
+                    dp.CP,
                 )
 
             dp.PC += INSTR_SIZE
@@ -614,10 +748,7 @@ class ControlUnit:
         dp.PC = int(dp.interruption_vector)
 
     def exec(self, opcode: OpCode, arg: int) -> None:  # noqa: C901
-        """Execute a single instruction (hardwired control unit).
-
-        This is intentionally an explicit if/elif chain mirroring the ISA.
-        """
+        """Execute a single instruction (hardwired control unit)."""
         dp = self.dp
 
         def to_s32(x: int) -> int:
@@ -642,11 +773,11 @@ class ControlUnit:
             dp.mem_write_word(arg, dp.ACC)
             return
         if opcode == OpCode.STORE_IND:
-            addr = dp.runtime_stack.pop() if dp.runtime_stack else 0
+            addr = dp.mem_pop()
             dp.mem_write_word(addr, dp.ACC)
             return
         if opcode == OpCode.LOAD_IND:
-            addr = dp.runtime_stack.pop() if dp.runtime_stack else 0
+            addr = dp.mem_pop()
             dp.ACC = dp.mem_read_word(addr)
             return
         if opcode == OpCode.ADD_IMM:
@@ -675,18 +806,20 @@ class ControlUnit:
                 dp.PC = dp.code_start + arg
             return
         if opcode == OpCode.PUSH_IMM:
-            dp.runtime_stack.append(dp.ACC)
+            dp.mem_push(dp.ACC)
             return
         if opcode == OpCode.POP:
-            dp.ACC = dp.runtime_stack.pop() if dp.runtime_stack else 0
+            dp.ACC = dp.mem_pop()
             return
         if opcode == OpCode.CALL:
-            dp.call_stack.append(dp.PC)
+            dp.call_push(dp.PC)
             dp.PC = dp.code_start + arg
             return
         if opcode == OpCode.RET:
-            if dp.call_stack:
-                dp.PC = dp.call_stack.pop()
+            # pop return address from call-stack
+            if dp.CP < dp.mem_cells:
+                retaddr = dp.call_pop()
+                dp.PC = int(retaddr)
                 return
             # returning from interrupt (if in interruption)
             if dp.in_interruption and dp.interrupt_return_state:
@@ -698,7 +831,6 @@ class ControlUnit:
             dp.PC = len(dp.memory)
             return
         if opcode == OpCode.SETVEC:
-            # store absolute PC for the vector (arg is code-relative offset)
             dp.interruption_vector = dp.code_start + arg
             logging.debug("SETVEC -> %s", dp.interruption_vector)
             return
@@ -719,7 +851,7 @@ class ControlUnit:
             logging.debug("IRET -> returned from interrupt")
             return
         if opcode == OpCode.BINOP_POP:
-            v = dp.runtime_stack.pop() if dp.runtime_stack else 0
+            v = dp.mem_pop()
             code = int(arg)
             if code == 1:  # ADD
                 dp.ACC = to_s32(v + dp.ACC)
@@ -737,7 +869,7 @@ class ControlUnit:
             return
 
         if opcode == OpCode.CMP_POP:
-            v = dp.runtime_stack.pop() if dp.runtime_stack else 0
+            v = dp.mem_pop()
             code = int(arg)
 
             def as_signed(x: int) -> int:
@@ -767,8 +899,9 @@ class ControlUnit:
         if opcode == OpCode.LOAD_LOCAL:
             idx = int(arg)
             pos = dp.FP + idx
-            if 0 <= pos < len(dp.runtime_stack):
-                dp.ACC = dp.runtime_stack[pos]
+            if 0 <= pos < dp.runtime_len:
+                phys = dp._phys_addr_for_logical_index(pos)
+                dp.ACC = dp.read_word(phys)
             else:
                 dp.ACC = 0
             return
@@ -776,9 +909,11 @@ class ControlUnit:
         if opcode == OpCode.STORE_LOCAL:
             idx = int(arg)
             pos = dp.FP + idx
-            if pos >= len(dp.runtime_stack):
-                dp.runtime_stack.extend([0] * (pos + 1 - len(dp.runtime_stack)))
-            dp.runtime_stack[pos] = int(dp.ACC) & 0xFFFFFFFF
+            if pos >= dp.runtime_len:
+                while dp.runtime_len <= pos:
+                    dp.mem_push(0)
+            phys = dp._phys_addr_for_logical_index(pos)
+            dp.mem_write_word(phys, dp.ACC)
             return
 
         if opcode == OpCode.ENTER:
@@ -921,6 +1056,8 @@ def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | Non
     spc = cfg.get("string_pool_cells", None)
     if spc is None:
         spc = 1024
+    call_stack_cells = cfg.get("call_stack_cells", 1024)
+    frame_stack_cells = cfg.get("frame_stack_cells", 256)
     lenient = cfg.get("lenient_log", False)
 
     dp = Datapath(
@@ -932,6 +1069,8 @@ def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | Non
         tick_limit=tick_limit,
         pause_tick=pause_tick,
         string_pool_cells=spc,
+        call_stack_cells=call_stack_cells,
+        frame_stack_cells=frame_stack_cells,
         lenient_log=lenient,
     )
     cu = ControlUnit(dp)
@@ -954,7 +1093,7 @@ def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | Non
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             _write_debug_out_files(code_bytes)
     except Exception as e:
-        logging.debug("Failed to write debug out files: %s", e)
+        logging.debug("Failed to write out.hex/out.bin: %s", e)
 
     return out, ticks, state
 
@@ -1052,6 +1191,8 @@ if __name__ == "__main__":
         spc = vm_cfg.get("string_pool_cells", None)
         if spc is None:
             spc = 1024
+        call_stack_cells = vm_cfg.get("call_stack_cells", 1024)
+        frame_stack_cells = vm_cfg.get("frame_stack_cells", 256)
         lenient = vm_cfg.get("lenient_log", False)
         dp = Datapath(
             code_bytes,
@@ -1062,6 +1203,8 @@ if __name__ == "__main__":
             tick_limit=vm_cfg["tick_limit"],
             pause_tick=vm_cfg["pause_tick"],
             string_pool_cells=spc,
+            call_stack_cells=call_stack_cells,
+            frame_stack_cells=frame_stack_cells,
             lenient_log=lenient,
         )
         dp.schedule_input(sched)
