@@ -1,4 +1,4 @@
-"""Module helps us to decode and encode instructions."""
+"""ISA: instruction encodings and helpers."""
 
 import struct
 from enum import IntEnum
@@ -19,8 +19,8 @@ class OpCode(IntEnum):
     LOAD_CONST = 20  # ACC = data_word_addr
     LOAD_MEM = 21  # ACC = MEM[arg]
     STORE_MEM = 22  # MEM[arg] = ACC
-    STORE_IND = 23  # MEM[arg] = ACC (arg is popped from stack)
-    LOAD_IND = 24  # ACC = MEM[arg]  (arg is popped from stack)
+    STORE_IND = 23  # MEM[addr_popped_from_stack] = ACC
+    LOAD_IND = 24  # ACC = MEM[addr_popped_from_stack]
 
     JMP = 30
     BEQZ = 31
@@ -32,9 +32,10 @@ class OpCode(IntEnum):
     EI = 51
     DI = 52
     IRET = 53
+    SOFTINT = 54  # software/internal interrupt
 
-    PUSH_IMM = 60
-    POP = 61
+    PUSH_IMM = 60  # push ACC to stack
+    POP = 61  # pop -> ACC
 
     PRINT = 70
     READ = 71
@@ -42,8 +43,8 @@ class OpCode(IntEnum):
     BINOP_POP = 90  # arg: 1=ADD,2=SUB,3=MUL,4=DIV  (pop v; ACC = v <op> ACC)
     CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=   (pop v; ACC = cond(v, ACC) ? 1 : 0)
 
-    LOAD_LOCAL = 80  # ACC = runtime_stack[FP + arg]
-    STORE_LOCAL = 81  # runtime_stack[FP + arg] = ACC
+    LOAD_LOCAL = 80  # ACC = frame_local_or_arg[arg]
+    STORE_LOCAL = 81  # frame_local_or_arg[arg] = ACC
     ENTER = 82  # arg: (total_locals << 16) | num_args
     LEAVE = 83  # pop frame
 
@@ -52,7 +53,7 @@ INSTR_SIZE = 5  # 1 byte opcode + 4 byte signed little-endian arg
 
 
 def encode_instr(opcode: OpCode, arg: int = 0) -> bytes:
-    """Decode instruction from opcode."""
+    """Encode instruction (opcode + 32-bit little-endian signed arg)."""
     val = int(arg) & 0xFFFFFFFF
     if val & 0x80000000:
         signed = val - (1 << 32)
@@ -70,11 +71,6 @@ def decode_instr(blob: bytes, offset: int) -> tuple[OpCode, int]:
     opcode = OpCode(b[0])
     arg = struct.unpack("<i", b[1:5])[0]
     return opcode, arg
-
-
-def instr_to_hex(instr_bytes: bytes) -> str:
-    """Get instruction in hexadecimal form."""
-    return instr_bytes.hex().upper()
 
 
 def mnemonic(opcode: OpCode, arg: int) -> str:
@@ -98,6 +94,7 @@ def mnemonic(opcode: OpCode, arg: int) -> str:
         OpCode.STORE_LOCAL,
         OpCode.ENTER,
         OpCode.LEAVE,
+        OpCode.SOFTINT,
     ):
         return f"{opcode.name} {arg}"
     return opcode.name

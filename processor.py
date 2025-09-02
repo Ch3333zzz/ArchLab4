@@ -131,7 +131,7 @@ class Datapath:
     interruption_allowed: bool
     interruption_vector: int | None
     in_interruption: bool
-    interrupt_return_state: tuple[int, int] | None
+    interrupt_return_state: tuple[int, ...] | None
     input_schedule: list[tuple[int, str]]
     input_closed: bool
     mmio_in: int
@@ -430,7 +430,9 @@ class Datapath:
         new_fsp = self.FSP - 1
         # Prevent overlap with runtime-stack: new_fsp must be > SP
         if new_fsp < 0 or new_fsp >= self.mem_cells or not (new_fsp > self.SP):
-            logging.debug("frame_push: frame-stack overflow or collision -> new_fsp=%s SP=%s; push ignored", new_fsp, self.SP)
+            logging.debug(
+                "frame_push: frame-stack overflow or collision -> new_fsp=%s SP=%s; push ignored", new_fsp, self.SP
+            )
             return
         self.FSP = new_fsp
         try:
@@ -466,7 +468,9 @@ class Datapath:
         new_cp = self.CP - 1
         # Prevent overlap: new_cp must be > FSP (physical). If new_cp <= FSP -> collision
         if new_cp < 0 or new_cp >= self.mem_cells or not (new_cp > self.FSP):
-            logging.debug("call_push: call-stack overflow or collision -> new_cp=%s FSP=%s; push ignored", new_cp, self.FSP)
+            logging.debug(
+                "call_push: call-stack overflow or collision -> new_cp=%s FSP=%s; push ignored", new_cp, self.FSP
+            )
             return
         self.CP = new_cp
         try:
@@ -613,12 +617,14 @@ class ControlUnit:
                 if ch == "":
                     ch = " "
                 ch0 = ch[0]
+                # write to mmio input cell
                 dp.mem_write_word(dp.mmio_in, ord(ch0))
-                dp.interrupt_ready = True
                 dp.last_interrupt_source = "IN"
                 logging.debug("[tick %d] input arrived: %r (source=IN)", dp.tick, ch0)
+                # Handle interrupt immediately
+                self.handle_interrupt()
 
-            # handle interrupt (hardwired)
+            # handle interrupt (hardwired): keep the existing path
             interrupt_ready = dp.interrupt_ready
             interruption_allowed = dp.interruption_allowed
             in_interruption = dp.in_interruption
@@ -734,18 +740,56 @@ class ControlUnit:
     def handle_interrupt(self) -> None:
         """Handle an interrupt by jumping to the configured vector.
 
-        Save return state so RET/IRET can restore execution.
+        Save full return state so IRET/RET can restore execution.
         """
         dp = self.dp
-        dp.interrupt_return_state = (dp.PC, dp.ACC)
-        dp.in_interruption = True
-        dp.interrupt_ready = False
-        dp.interruption_allowed = False
+        # Check vector first
         if dp.interruption_vector is None:
             logging.debug("No interruption_vector set -> ignore interrupt")
             return
-        # interruption_vector is stored as absolute PC already
+
+        # Save full context needed to restore execution (PC points to the instruction about to be executed)
+        dp.interrupt_return_state = (
+            int(dp.PC),
+            int(dp.ACC),
+            int(dp.FP),
+            int(dp.runtime_len),
+            int(dp.FSP),
+            int(dp.CP),
+        )
+        dp.in_interruption = True
+        dp.interrupt_ready = False
+        dp.interruption_allowed = False
         dp.PC = int(dp.interruption_vector)
+        logging.debug(
+            "[handle_interrupt] jumping to vector %s, saved state %r", dp.interruption_vector, dp.interrupt_return_state
+        )
+
+    def _restore_interrupt_return_state(self) -> None:
+        """Restore saved context on IRET or RET-from-interrupt."""
+        dp = self.dp
+        if not dp.interrupt_return_state:
+            return
+        pc, acc, fp, rlen, fsp, cp = dp.interrupt_return_state
+        dp.PC = int(pc)
+        dp.ACC = int(acc)
+        dp.FP = int(fp)
+        dp.runtime_len = int(rlen)
+        dp.SP = dp.runtime_base - dp.runtime_len
+        dp.FSP = int(fsp)
+        dp.CP = int(cp)
+        dp.in_interruption = False
+        dp.interruption_allowed = True
+        dp.interrupt_return_state = None
+        logging.debug(
+            "[restore_interrupt_return_state] restored PC=%s ACC=%s FP=%s runtime_len=%s FSP=%s CP=%s",
+            dp.PC,
+            dp.ACC,
+            dp.FP,
+            dp.runtime_len,
+            dp.FSP,
+            dp.CP,
+        )
 
     def exec(self, opcode: OpCode, arg: int) -> None:  # noqa: C901
         """Execute a single instruction (hardwired control unit)."""
@@ -816,17 +860,19 @@ class ControlUnit:
             dp.PC = dp.code_start + arg
             return
         if opcode == OpCode.RET:
-            # pop return address from call-stack
+            # normal return via call-stack
             if dp.CP < dp.mem_cells:
                 retaddr = dp.call_pop()
                 dp.PC = int(retaddr)
+                # If we were in interruption and return addr is used to restore,
+                # also support returning from interrupt via RET (fall-back)
+                if dp.in_interruption and dp.interrupt_return_state:
+                    # restore full saved state
+                    self._restore_interrupt_return_state()
                 return
-            # returning from interrupt (if in interruption)
+            # returning from interrupt (if in_interruption and no call stack)
             if dp.in_interruption and dp.interrupt_return_state:
-                dp.PC, dp.ACC = dp.interrupt_return_state
-                dp.in_interruption = False
-                dp.interruption_allowed = True
-                dp.interrupt_return_state = None
+                self._restore_interrupt_return_state()
                 return
             dp.PC = len(dp.memory)
             return
@@ -843,12 +889,15 @@ class ControlUnit:
             logging.debug("DI -> interrupts disabled")
             return
         if opcode == OpCode.IRET:
-            if dp.interrupt_return_state:
-                dp.PC, dp.ACC = dp.interrupt_return_state
-            dp.in_interruption = False
-            dp.interruption_allowed = True
-            dp.interrupt_return_state = None
+            # restore saved state fully
+            self._restore_interrupt_return_state()
             logging.debug("IRET -> returned from interrupt")
+            return
+        if opcode == OpCode.SOFTINT:
+            # software interrupt: invoke handler immediately (internal)
+            dp.last_interrupt_source = "SW"
+            logging.debug("SOFTINT executed -> invoking handler")
+            self.handle_interrupt()
             return
         if opcode == OpCode.BINOP_POP:
             v = dp.mem_pop()

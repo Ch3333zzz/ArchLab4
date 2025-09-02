@@ -53,10 +53,11 @@ expect:
     150 - 5300000000 - LEAVE 0
     155 - 2900000000 - RET
   out_log: |
-    DEBUG root:processor.py:606 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
-    DEBUG root:processor.py:962 PRINT: numeric -> 8
+    DEBUG root:processor.py:610 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
+    DEBUG root:processor.py:1011 PRINT: numeric -> 8
     DEBUG root:processor.py:314 [MMIO OUT] wrote 56 -> char: 8
-    DEBUG root:processor.py:713 HALT encountered
+    DEBUG root:processor.py:719 HALT encountered
+
 
 
 
