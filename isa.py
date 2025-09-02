@@ -40,13 +40,18 @@ class OpCode(IntEnum):
     PRINT = 70
     READ = 71
 
-    BINOP_POP = 90  # arg: 1=ADD,2=SUB,3=MUL,4=DIV  (pop v; ACC = v <op> ACC)
-    CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=   (pop v; ACC = cond(v, ACC) ? 1 : 0)
-
     LOAD_LOCAL = 80  # ACC = frame_local_or_arg[arg]
     STORE_LOCAL = 81  # frame_local_or_arg[arg] = ACC
     ENTER = 82  # arg: (total_locals << 16) | num_args
     LEAVE = 83  # pop frame
+
+    # --- new array/heap ops ---
+    ALLOC = 84  # allocate arg words (if arg==0, take size from ACC)
+    ASET = 85  # array set: if arg!=0 base=arg else pop idx then pop base; write ACC
+    AGET = 86  # array get: if arg!=0 base=arg else pop idx then pop base; load ACC
+
+    BINOP_POP = 90  # arg: 1=ADD,2=SUB,3=MUL,4=DIV  (pop v; ACC = v <op> ACC)
+    CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=   (pop v; ACC = cond(v, ACC) ? 1 : 0)
 
 
 INSTR_SIZE = 5  # 1 byte opcode + 4 byte signed little-endian arg
@@ -95,6 +100,9 @@ def mnemonic(opcode: OpCode, arg: int) -> str:
         OpCode.ENTER,
         OpCode.LEAVE,
         OpCode.SOFTINT,
+        OpCode.ALLOC,
+        OpCode.ASET,
+        OpCode.AGET,
     ):
         return f"{opcode.name} {arg}"
     return opcode.name

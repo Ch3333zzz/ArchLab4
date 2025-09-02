@@ -36,6 +36,7 @@ TOKEN_RE = re.compile(
 )
 FORBIDDEN_FOR_USER = {"push", "pop", "ei", "di", "halt"}
 
+
 def tokenize(s: str) -> list[str]:
     """Compile regexp, find matches and return list of tokens (skip comments)."""
     tokens: list[str] = []
@@ -249,9 +250,12 @@ class Compiler:
         if len(node) < 3:
             raise RuntimeError("malformed defun: " + repr(node))
         _, name, args, *body = node
+
+        # forbid reserved names for functions
         if isinstance(name, str) and name.lower() in FORBIDDEN_FOR_USER:
             err = f"function name '{name}' is reserved and not allowed"
             raise RuntimeError(err)
+
         addr = self.pc  # function address
         self.labels[name] = addr
 
@@ -298,6 +302,11 @@ class Compiler:
     # --- small helper compile fragments ---
     def _compile_setq(self, expr: list[Any]) -> None:
         _, var, val = expr
+
+        if isinstance(var, str) and var.lower() in FORBIDDEN_FOR_USER:
+            err = f"variable name '{var}' is reserved and not allowed"
+            raise RuntimeError(err)
+
         self.compile_expr(val)
         if self.current_locals is not None and isinstance(var, str) and var in self.current_locals:
             self.emit(OpCode.STORE_LOCAL, self.current_locals[var])
@@ -414,6 +423,51 @@ class Compiler:
         mmio_out_addr = 0xFFF1
         self.emit(OpCode.STORE_MEM, mmio_out_addr)
 
+    # --- new array/heap compile helpers ---
+    def _compile_alloc(self, expr: list[Any]) -> None:
+        # (alloc n)  where n is either int literal or expression
+        if len(expr) < 2:
+            # no size -> allocate 0 -> ALLOC 0 will return 0
+            self.emit(OpCode.ALLOC, 0)
+            return
+        size_expr = expr[1]
+        if isinstance(size_expr, int):
+            self.emit(OpCode.ALLOC, int(size_expr))
+            return
+        # dynamic: compute size -> result in ACC, then ALLOC 0
+        self.compile_expr(size_expr)
+        self.emit(OpCode.ALLOC, 0)
+
+    def _compile_aset(self, expr: list[Any]) -> None:
+        # (aset base idx val)
+        if len(expr) != 4:
+            err = "aset expects exactly 3 args: base idx value"
+            raise RuntimeError(err)
+        base, idx, val = expr[1], expr[2], expr[3]
+        # compile base and push it
+        self.compile_expr(base)
+        self.emit(OpCode.PUSH_IMM, 0)
+        # compile idx and push it
+        self.compile_expr(idx)
+        self.emit(OpCode.PUSH_IMM, 0)
+        # compile value into ACC
+        self.compile_expr(val)
+        # dynamic form: pop idx & base, use ACC as value
+        self.emit(OpCode.ASET, 0)
+
+    def _compile_aget(self, expr: list[Any]) -> None:
+        # (aget base idx) -> leaves value in ACC
+        if len(expr) != 3:
+            err = "aget expects exactly 2 args: base idx"
+            raise RuntimeError(err)
+        base, idx = expr[1], expr[2]
+        # push base then push idx, call AGET 0 which will pop idx, base
+        self.compile_expr(base)
+        self.emit(OpCode.PUSH_IMM, 0)
+        self.compile_expr(idx)
+        self.emit(OpCode.PUSH_IMM, 0)
+        self.emit(OpCode.AGET, 0)
+
     # --- symbol handling ---
     def _compile_symbol(self, expr: str) -> None:
         if self.current_locals and expr in self.current_locals:
@@ -447,7 +501,7 @@ class Compiler:
         self.emit(OpCode.HALT, 0)
 
     # --- main compile_expr (delegates to helpers to reduce complexity) ---
-    def compile_expr(self, expr: Any) -> None:
+    def compile_expr(self, expr: Any) -> None:  # noqa: C901
         """Compile an expression (recursive)."""
         # top-level dispatch kept intentionally tiny — helpers do the work
         if expr is None:
@@ -472,9 +526,12 @@ class Compiler:
         head = expr[0]
 
         if isinstance(head, str):
-                if head.lower() in FORBIDDEN_FOR_USER:
-                    err = f"these ops are emitted by the compiler automatically."
-                    raise RuntimeError(err)
+            if head.lower() in FORBIDDEN_FOR_USER:
+                err = (
+                    f"use of reserved low-level form '{head}' is not allowed in user code; "
+                    "these ops are emitted by the compiler automatically."
+                )
+                raise RuntimeError(err)
 
         handlers: dict[str, Callable[[list[Any]], None]] = {
             "setq": self._compile_setq,
@@ -496,6 +553,9 @@ class Compiler:
             "while": self._compile_while,
             "progn": self._handle_progn,
             "out": self._compile_out,
+            "alloc": self._compile_alloc,
+            "aset": self._compile_aset,
+            "aget": self._compile_aget,
         }
 
         # arithmetic and comparisons handled via helpers

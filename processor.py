@@ -190,6 +190,12 @@ class Datapath:
         self.memory[self.code_start : self.code_start + code_len] = self.code_bytes
         self.code_len = code_len
 
+        # heap pointer (word index): start allocation at first free word after code
+        # code_start and code_len are bytes; convert to word index
+        code_end_word = (self.code_start + self.code_len) // 4
+        self.heap_ptr = int(code_end_word)
+        logging.debug("Datapath: heap_ptr initialized to word %d", self.heap_ptr)
+
         # registers/state
         self.PC = self.code_start
         self.ACC = 0
@@ -974,6 +980,85 @@ class ControlUnit:
 
         if opcode == OpCode.LEAVE:
             dp.pop_frame()
+            return
+
+        # --- new array/heap ops ---
+        if opcode == OpCode.ALLOC:
+            # allocate arg words if arg != 0, else take size from ACC
+            size = int(arg) if int(arg) != 0 else int(dp.ACC)
+            try:
+                size = int(size)
+            except Exception:
+                size = 0
+            if size <= 0:
+                dp.ACC = 0
+                logging.debug("ALLOC: size <= 0 -> return 0")
+                return
+            # check heap vs runtime_base collision
+            base = int(dp.heap_ptr)
+            if base + size > dp.runtime_base:
+                logging.debug(
+                    "ALLOC: out of memory: requested %d words, heap_ptr=%d, runtime_base=%d",
+                    size,
+                    base,
+                    dp.runtime_base,
+                )
+                dp.ACC = 0
+                return
+            # zero memory for safety
+            for i in range(size):
+                try:
+                    dp.write_word(base + i, 0)
+                except MemoryError:
+                    logging.debug("ALLOC: write failed at %d", base + i)
+            dp.heap_ptr = base + size
+            dp.ACC = base
+            logging.debug("ALLOC: allocated %d words at base %d (new heap_ptr=%d)", size, base, dp.heap_ptr)
+            return
+
+        if opcode == OpCode.ASET:
+            # If arg != 0: arg is base; pop index from stack
+            # If arg == 0: pop index then pop base from stack
+            try:
+                if int(arg) != 0:
+                    base = int(arg)
+                    idx = dp.mem_pop()
+                else:
+                    idx = dp.mem_pop()
+                    base = dp.mem_pop()
+                if idx is None:
+                    idx = 0
+                addr = int(base) + int(idx)
+                # basic bounds check: ensure writing inside memory and not in reserved stack area
+                if addr < 0 or addr >= dp.mem_cells or addr >= dp.runtime_base:
+                    logging.debug("ASET: out-of-bounds write attempt at word %d (base=%s idx=%s)", addr, base, idx)
+                    return
+                dp.mem_write_word(addr, dp.ACC)
+                logging.debug("ASET: wrote ACC=%s to word %d (base=%s idx=%s)", dp.ACC, addr, base, idx)
+            except Exception as e:
+                logging.debug("ASET: exception %s", e)
+            return
+
+        if opcode == OpCode.AGET:
+            # If arg != 0: arg is base; pop index
+            # If arg == 0: pop index then base
+            try:
+                if int(arg) != 0:
+                    base = int(arg)
+                    idx = dp.mem_pop()
+                else:
+                    idx = dp.mem_pop()
+                    base = dp.mem_pop()
+                addr = int(base) + int(idx)
+                if addr < 0 or addr >= dp.mem_cells or addr >= dp.runtime_base:
+                    logging.debug("AGET: out-of-bounds read attempt at word %d (base=%s idx=%s)", addr, base, idx)
+                    dp.ACC = 0
+                    return
+                dp.ACC = dp.mem_read_word(addr)
+                logging.debug("AGET: loaded ACC=%s from word %d (base=%s idx=%s)", dp.ACC, addr, base, idx)
+            except Exception as e:
+                logging.debug("AGET: exception %s", e)
+                dp.ACC = 0
             return
 
         if opcode == OpCode.PRINT:
