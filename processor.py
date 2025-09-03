@@ -982,7 +982,6 @@ class ControlUnit:
             dp.pop_frame()
             return
 
-        # --- new array/heap ops ---
         if opcode == OpCode.ALLOC:
             # allocate arg words if arg != 0, else take size from ACC
             size = int(arg) if int(arg) != 0 else int(dp.ACC)

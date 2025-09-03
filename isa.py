@@ -54,28 +54,49 @@ class OpCode(IntEnum):
     CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=   (pop v; ACC = cond(v, ACC) ? 1 : 0)
 
 
-INSTR_SIZE = 5  # 1 byte opcode + 4 byte signed little-endian arg
+# Instruction size is now 4 bytes (single machine word)
+# Layout (32-bit little-endian word):
+#  bytes (low..high) : [ arg_low (8) | arg_mid (8) | arg_high (8) | opcode (8) ]
+#  i.e. 24-bit signed arg in low 3 bytes, 8-bit opcode in high byte
+INSTR_SIZE = 4  # 4 bytes per instruction
 
 
 def encode_instr(opcode: OpCode, arg: int = 0) -> bytes:
-    """Encode instruction (opcode + 32-bit little-endian signed arg)."""
-    val = int(arg) & 0xFFFFFFFF
-    if val & 0x80000000:
-        signed = val - (1 << 32)
-    else:
-        signed = val
-    return bytes([int(opcode)]) + struct.pack("<i", signed)
+    """Encode instruction into 4 bytes.
+
+    Format: 32-bit little-endian word: (opcode << 24) | (arg & 0x00FFFFFF)
+    Arg is treated as 24-bit signed value when decoded.
+    """
+    op = int(opcode) & 0xFF
+    try:
+        a = int(arg)
+    except Exception:
+        a = 0
+    # store only low 24 bits
+    a24 = a & 0xFFFFFF
+    word = (op << 24) | a24
+    return struct.pack("<I", word)
 
 
 def decode_instr(blob: bytes, offset: int) -> tuple[OpCode, int]:
-    """Decode instruction from bytes."""
+    """Decode instruction from bytes at offset.
+
+    Returns (OpCode, signed_arg).
+    Raises EOFError if not enough bytes.
+    """
     b = blob[offset : offset + INSTR_SIZE]
     if len(b) < INSTR_SIZE:
         err = "End of program"
         raise EOFError(err)
-    opcode = OpCode(b[0])
-    arg = struct.unpack("<i", b[1:5])[0]
-    return opcode, arg
+    (word,) = struct.unpack("<I", b)
+    op = (word >> 24) & 0xFF
+    arg_raw = word & 0xFFFFFF
+    # sign-extend 24-bit
+    if arg_raw & 0x800000:
+        arg = arg_raw - (1 << 24)
+    else:
+        arg = arg_raw
+    return OpCode(op), int(arg)
 
 
 def mnemonic(opcode: OpCode, arg: int) -> str:

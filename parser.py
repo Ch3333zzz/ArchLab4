@@ -147,8 +147,8 @@ class Compiler:
         b = encode_instr(opcode, arg)
         # ensure debug stores a bytearray (encode_instr may return bytes/bytearray)
         b_arr = bytearray(b)
-        self.code += b_arr
         addr = self.pc
+        self.code += b_arr
         self.debug.append((addr, b_arr, f"{opcode.name} {arg}"))
         self.pc += INSTR_SIZE
         return addr
@@ -182,6 +182,51 @@ class Compiler:
         self.consts[s] = addr
         return addr
 
+    # --- helper to patch/store 24-bit arg preserving opcode byte ---
+    def _write_arg_at(self, pos: int, arg: int) -> None:
+        """Write the instruction argument into instruction starting at byte pos."""
+        if INSTR_SIZE < 2:
+            err = "INSTR_SIZE must be >= 2"
+            raise RuntimeError(err)
+
+        arg_bytes_len = INSTR_SIZE - 1
+        mask = (1 << (8 * arg_bytes_len)) - 1
+        a_val = int(arg) & mask
+        arg_bytes = a_val.to_bytes(arg_bytes_len, byteorder="little", signed=False)
+
+        endpos = pos + INSTR_SIZE
+        if len(self.code) < endpos:
+            # should not normally happen, but be robust
+            self.code += b"\x00" * (endpos - len(self.code))
+
+        # opcode is at the last byte of the instruction (little-endian representation)
+        opcode_pos = pos + arg_bytes_len
+        # write argument bytes into pos .. opcode_pos-1
+        self.code[pos:opcode_pos] = arg_bytes
+
+        # leave self.code[opcode_pos] unchanged (preserve opcode byte)
+
+        # update debug record if exists
+        for i, (a, _b, m) in enumerate(self.debug):
+            if a == pos:
+                mnemonic_part = m.split()[0]
+                self.debug[i] = (a, self.code[a : a + INSTR_SIZE], f"{mnemonic_part} {arg}")
+                break
+
+    def _patch_labels(self) -> None:
+        """Patch label placeholders in emitted code."""
+        for pos, label in self.patch:
+            if label not in self.labels:
+                raise RuntimeError("unknown label " + label)
+            addr = self.labels[label]
+            self._write_arg_at(pos, addr)
+
+    def compile(self) -> None:
+        """Compile top-level AST into code+data."""
+        self._compile_main()
+        self._compile_defuns()
+        self._patch_labels()
+
     # --- compile functions ---
     def _compile_main(self) -> None:
         """Compile top-level non-defun forms as main and emit HALT."""
@@ -196,24 +241,6 @@ class Compiler:
         for node in self.ast:
             if isinstance(node, list) and node and node[0] == "defun":
                 self.compile_defun(node)
-
-    def _patch_labels(self) -> None:
-        """Patch label placeholders in emitted code."""
-        for pos, label in self.patch:
-            if label not in self.labels:
-                raise RuntimeError("unknown label " + label)
-            addr = self.labels[label]
-            self.code[pos + 1 : pos + 5] = struct.pack("<i", addr)
-            for i, (a, _b, m) in enumerate(self.debug):
-                if a == pos:
-                    self.debug[i] = (a, self.code[a : a + INSTR_SIZE], f"{m.split()[0]} {addr}")
-                    break
-
-    def compile(self) -> None:
-        """Compile top-level AST into code+data."""
-        self._compile_main()
-        self._compile_defuns()
-        self._patch_labels()
 
     # --- local-name collection  ---
     def _extract_setq_targets(self, body: list[Any]) -> list[str]:
@@ -347,11 +374,13 @@ class Compiler:
         self.compile_expr(thenb)
         jmp_pos = self.emit(OpCode.JMP, 0)
         else_addr = self.pc
-        self.code[be_pos + 1 : be_pos + 5] = struct.pack("<i", else_addr)
+        # write else_addr into BEQZ at be_pos (preserve opcode)
+        self._write_arg_at(be_pos, else_addr)
         if rest:
             self.compile_expr(rest[0])
         end_addr = self.pc
-        self.code[jmp_pos + 1 : jmp_pos + 5] = struct.pack("<i", end_addr)
+        # write end_addr into JMP at jmp_pos
+        self._write_arg_at(jmp_pos, end_addr)
 
     def _compile_while(self, expr: list[Any]) -> None:
         _, cond, *body = expr
@@ -362,7 +391,7 @@ class Compiler:
             self.compile_expr(b)
         self.emit(OpCode.JMP, loop_start)
         after = self.pc
-        self.code[be_pos + 1 : be_pos + 5] = struct.pack("<i", after)
+        self._write_arg_at(be_pos, after)
 
     def _compile_binop(self, head: str, expr: list[Any]) -> None:
         if len(expr) == 2:
