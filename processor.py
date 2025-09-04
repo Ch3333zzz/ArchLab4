@@ -22,23 +22,58 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     """Configure root logger to write to `logfile`.
 
     If debug=True set DEBUG level. If console=True also echo logs to stdout.
+
+    NOTE: when debug=True we use a compact log format without timestamp so that
+    entries look like:
+        DEBUG root:processor.py:197 Datapath: heap_ptr initialized to word 1027
+    which matches the requested style.
     """
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)
     lvl = logging.DEBUG if debug else logging.CRITICAL
     root.setLevel(lvl)
+
+    # Choose formats. In debug mode use compact format (no timestamp) so lines match:
     if debug:
-        fmt = "%(levelname)-5s %(name)s:%(filename)s:%(lineno)d %(message)s"
-        fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
-        fh.setLevel(lvl)
-        fh.setFormatter(logging.Formatter(fmt))
-        root.addHandler(fh)
-        if console:
-            ch = logging.StreamHandler(sys.stdout)
-            ch.setLevel(lvl)
-            ch.setFormatter(logging.Formatter("%(levelname)5s %(message)s"))
-            root.addHandler(ch)
+        file_fmt = "%(levelname)s %(name)s:%(filename)s:%(lineno)d %(message)s"
+    else:
+        file_fmt = "%(levelname)-5s %(message)s"
+
+    # Custom formatter that indents all but the first formatted record.
+    # This reproduces the example where the first debug line appears without
+    # indentation and subsequent lines are indented for readability.
+    class _IndentOnceFormatter(logging.Formatter):
+        def __init__(self, fmt: str | None = None):
+            super().__init__(fmt)
+            self._seen_first = False
+
+        def format(self, record: logging.LogRecord) -> str:
+            s = super().format(record)
+            # Only the very first formatted record is left unindented; all
+            # subsequent records are prefixed with 4 spaces to match the
+            # requested style.
+            if not self._seen_first:
+                self._seen_first = True
+                return s
+            return "    " + s
+
+    # always create a FileHandler even when not debug to allow easier inspection if asked
+    fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
+    fh.setLevel(lvl)
+    if debug:
+        fh.setFormatter(_IndentOnceFormatter(file_fmt))
+    else:
+        fh.setFormatter(logging.Formatter(file_fmt))
+    root.addHandler(fh)
+
+    if debug and console:
+        # Console: keep concise but readable
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(lvl)
+        # console shows level and message (no filename by default)
+        ch.setFormatter(logging.Formatter("%(levelname)5s %(message)s"))
+        root.addHandler(ch)
 
 
 # --- debug output helpers (split out to reduce complexity) ---
@@ -125,13 +160,14 @@ class Datapath:
     # call-stack
     call_stack_cells: int
     CP: int  # physical next-free index for call-stack (word index)
+    interrupt_stack_cells: int  # interrupt-stack (ISP)
+    ISP: int  # physical next-free index for interrupt-stack (word index)
 
     tick: int
     interrupt_ready: bool
     interruption_allowed: bool
     interruption_vector: int | None
     in_interruption: bool
-    interrupt_return_state: tuple[int, ...] | None
     input_schedule: list[tuple[int, str]]
     input_closed: bool
     mmio_in: int
@@ -156,6 +192,7 @@ class Datapath:
         string_pool_cells: int = 1024,
         call_stack_cells: int = 1024,
         frame_stack_cells: int = 256,
+        interrupt_stack_cells: int = 64,
         lenient_log: bool = False,
     ) -> None:
         """Initialize Datapath state and memory layout."""
@@ -200,31 +237,39 @@ class Datapath:
         self.PC = self.code_start
         self.ACC = 0
 
-        # reserve areas at top for frame-stack and call-stack (words)
+        # reserve areas at top for interrupt-stack, frame-stack and call-stack (words)
         self.call_stack_cells = int(call_stack_cells)
         if self.call_stack_cells < 1:
             self.call_stack_cells = 1
         self.frame_stack_cells = int(frame_stack_cells)
         if self.frame_stack_cells < 0:
             self.frame_stack_cells = 0
+        self.interrupt_stack_cells = int(interrupt_stack_cells)
+        if self.interrupt_stack_cells < 0:
+            self.interrupt_stack_cells = 0
 
-        top_reserved = self.call_stack_cells + self.frame_stack_cells
+        top_reserved = self.call_stack_cells + self.frame_stack_cells + self.interrupt_stack_cells
         if top_reserved >= self.mem_cells:
             err = "Not enough memory to reserve stacks"
             raise MemoryError(err)
 
-        # runtime_base is the first word after data up to top_reserved
+        # runtime_base is the first word after reserved top area
         self.runtime_base = self.mem_cells - top_reserved
 
         # runtime-stack initially empty
         self.runtime_len = 0
-        self.SP = self.runtime_base  # physical next-free index
+        self.SP = self.runtime_base  # physical next-free index (stack grows downward)
         self.FP = 0  # logical frame pointer
 
         # frame-stack pointer (physical next-free index)
-        # frame-stack area starts at runtime_base and has frame_stack_cells words
-        # empty FSP == runtime_base + frame_stack_cells
-        self.FSP = self.runtime_base + self.frame_stack_cells
+        # frame-stack area starts at runtime_base + interrupt_stack_cells and has frame_stack_cells words
+        # empty FSP == runtime_base + interrupt_stack_cells + frame_stack_cells
+        self.FSP = self.runtime_base + self.interrupt_stack_cells + self.frame_stack_cells
+
+        # interrupt-stack pointer (physical next-free index)
+        # interrupt-stack area is runtime_base .. runtime_base + interrupt_stack_cells - 1
+        # empty ISP == runtime_base + interrupt_stack_cells
+        self.ISP = self.runtime_base + self.interrupt_stack_cells
 
         # call-stack pointer (physical next-free index at very top)
         self.CP = int(self.mem_cells)
@@ -235,7 +280,6 @@ class Datapath:
         self.interruption_allowed = True
         self.interruption_vector = None
         self.in_interruption = False
-        self.interrupt_return_state = None
         self.input_schedule = []
         self.input_closed = False
         self.mmio_in = mmio_in
@@ -448,8 +492,8 @@ class Datapath:
 
     def frame_pop(self) -> int:
         """Pop a word from the frame-stack. Return 0 on underflow."""
-        # empty when FSP == runtime_base + frame_stack_cells
-        empty_fsp = self.runtime_base + self.frame_stack_cells
+        # empty when FSP == runtime_base + interrupt_stack_cells + frame_stack_cells
+        empty_fsp = self.runtime_base + self.interrupt_stack_cells + self.frame_stack_cells
         if self.FSP >= empty_fsp:
             logging.debug("frame_pop: frame-stack underflow -> returning 0")
             return 0
@@ -495,6 +539,48 @@ class Datapath:
             v = 0
         self.CP += 1
         return int(v)
+
+    # --- interrupt-stack helpers (ISP) ---
+    def isp_push(self, value: int) -> None:
+        """Push a word onto the interrupt-stack (ISP decreases)."""
+        try:
+            v = int(value) & 0xFFFFFFFF
+        except Exception:
+            v = 0
+        if v & 0x80000000:
+            v_signed = v - (1 << 32)
+        else:
+            v_signed = v
+        new_isp = self.ISP - 1
+        # Prevent overflow or collision with runtime-stack: new_isp must be >= runtime_base and > SP
+        if new_isp < 0 or new_isp >= self.mem_cells or not (new_isp >= self.runtime_base and new_isp > self.SP):
+            logging.debug(
+                "isp_push: interrupt-stack overflow or collision -> new_isp=%s SP=%s; push ignored", new_isp, self.SP
+            )
+            return
+        self.ISP = new_isp
+        try:
+            self.write_word(self.ISP, v_signed)
+        except MemoryError:
+            logging.debug("isp_push: write out of range at %d", self.ISP)
+
+    def isp_pop(self) -> int:
+        """Pop a word from the interrupt-stack. Return 0 on underflow."""
+        empty_isp = self.runtime_base + self.interrupt_stack_cells
+        if self.ISP >= empty_isp:
+            logging.debug("isp_pop: interrupt-stack underflow -> returning 0")
+            return 0
+        try:
+            v = self.read_word(self.ISP)
+        except Exception:
+            v = 0
+        self.ISP += 1
+        return int(v)
+
+    def isp_empty(self) -> bool:
+        """Return True if interrupt-stack is empty."""
+        empty_isp = self.runtime_base + self.interrupt_stack_cells
+        return self.ISP >= empty_isp
 
     # Frame helpers: push_frame and pop_frame operate on runtime-stack and frame-stack in memory
     def push_frame(self, total_locals: int, num_args: int) -> None:
@@ -586,7 +672,8 @@ class ControlUnit:
         right = (
             f"ADDR: {addr_word if addr_word is not None else 0:5d} "
             f"MEM[ADDR]: {mem_val:10d} ACC: {acc:10d} SP: {self.dp.SP:5d} "
-            f"FSP: {self.dp.FSP:5d} CP: {self.dp.CP:5d} C: 0 V: 0\tINSTR: {instr}"
+            f"FSP: {self.dp.FSP:5d} CP: {self.dp.CP:5d} ISP: {self.dp.ISP:5d} "
+            f"heap_ptr: {self.dp.heap_ptr:5d} C: 0 V: 0\tINSTR: {instr}"
         )
         logging.debug(left + right)
 
@@ -746,7 +833,7 @@ class ControlUnit:
     def handle_interrupt(self) -> None:
         """Handle an interrupt by jumping to the configured vector.
 
-        Save full return state so IRET/RET can restore execution.
+        Save full return state into interrupt-stack (ISP) so IRET/RET can restore execution.
         """
         dp = self.dp
         # Check vector first
@@ -755,47 +842,75 @@ class ControlUnit:
             return
 
         # Save full context needed to restore execution (PC points to the instruction about to be executed)
-        dp.interrupt_return_state = (
-            int(dp.PC),
-            int(dp.ACC),
-            int(dp.FP),
-            int(dp.runtime_len),
-            int(dp.FSP),
-            int(dp.CP),
-        )
-        dp.in_interruption = True
-        dp.interrupt_ready = False
-        dp.interruption_allowed = False
-        dp.PC = int(dp.interruption_vector)
-        logging.debug(
-            "[handle_interrupt] jumping to vector %s, saved state %r", dp.interruption_vector, dp.interrupt_return_state
-        )
+        # We push a compact context onto ISP in this order (push CP first, PC last),
+        # so pop order will be: PC, ACC, FP, runtime_len, FSP, CP
+        try:
+            # Prevent nested saves from being interrupted in the middle: disallow further interrupts
+            dp.interruption_allowed = False
+
+            # Push context fields onto ISP. Use ints; ISP writes directly to memory (doesn't change runtime_len)
+            dp.isp_push(dp.CP)
+            dp.isp_push(dp.FSP)
+            dp.isp_push(dp.runtime_len)
+            dp.isp_push(dp.FP)
+            dp.isp_push(dp.ACC)
+            dp.isp_push(dp.PC)
+
+            dp.in_interruption = True
+            dp.interrupt_ready = False
+            # jump to handler (arg is absolute code_start + vector)
+            dp.PC = int(dp.interruption_vector)
+            logging.debug(
+                "[handle_interrupt] jumping to vector %s, context saved to ISP (ISP=%s)",
+                dp.interruption_vector,
+                dp.ISP,
+            )
+        except Exception as e:
+            logging.debug("handle_interrupt: failed to save context: %s", e)
+            # if failed, ensure we don't leave interrupts disabled permanently
+            dp.interruption_allowed = True
 
     def _restore_interrupt_return_state(self) -> None:
-        """Restore saved context on IRET or RET-from-interrupt."""
+        """Restore saved context from interrupt-stack (ISP) on IRET or RET-from-interrupt."""
         dp = self.dp
-        if not dp.interrupt_return_state:
+        # If ISP empty -> nothing to restore
+        if dp.isp_empty():
+            logging.debug("_restore_interrupt_return_state: ISP empty -> nothing to restore")
+            dp.in_interruption = False
+            dp.interruption_allowed = True
             return
-        pc, acc, fp, rlen, fsp, cp = dp.interrupt_return_state
-        dp.PC = int(pc)
-        dp.ACC = int(acc)
-        dp.FP = int(fp)
-        dp.runtime_len = int(rlen)
-        dp.SP = dp.runtime_base - dp.runtime_len
-        dp.FSP = int(fsp)
-        dp.CP = int(cp)
-        dp.in_interruption = False
-        dp.interruption_allowed = True
-        dp.interrupt_return_state = None
-        logging.debug(
-            "[restore_interrupt_return_state] restored PC=%s ACC=%s FP=%s runtime_len=%s FSP=%s CP=%s",
-            dp.PC,
-            dp.ACC,
-            dp.FP,
-            dp.runtime_len,
-            dp.FSP,
-            dp.CP,
-        )
+        try:
+            # pop in reverse order of push: PC, ACC, FP, runtime_len, FSP, CP
+            pc = dp.isp_pop()
+            acc = dp.isp_pop()
+            fp = dp.isp_pop()
+            rlen = dp.isp_pop()
+            fsp = dp.isp_pop()
+            cp = dp.isp_pop()
+
+            dp.PC = int(pc)
+            dp.ACC = int(acc)
+            dp.FP = int(fp)
+            dp.runtime_len = int(rlen)
+            dp.SP = dp.runtime_base - dp.runtime_len
+            dp.FSP = int(fsp)
+            dp.CP = int(cp)
+            dp.in_interruption = False
+            dp.interruption_allowed = True
+            logging.debug(
+                "[restore_interrupt_return_state] restored PC=%s ACC=%s FP=%s runtime_len=%s FSP=%s CP=%s",
+                dp.PC,
+                dp.ACC,
+                dp.FP,
+                dp.runtime_len,
+                dp.FSP,
+                dp.CP,
+            )
+        except Exception as e:
+            logging.debug("_restore_interrupt_return_state: exception %s", e)
+            # best-effort restore: clear interrupt flags
+            dp.in_interruption = False
+            dp.interruption_allowed = True
 
     def exec(self, opcode: OpCode, arg: int) -> None:  # noqa: C901
         """Execute a single instruction (hardwired control unit)."""
@@ -870,14 +985,13 @@ class ControlUnit:
             if dp.CP < dp.mem_cells:
                 retaddr = dp.call_pop()
                 dp.PC = int(retaddr)
-                # If we were in interruption and return addr is used to restore,
-                # also support returning from interrupt via RET (fall-back)
-                if dp.in_interruption and dp.interrupt_return_state:
-                    # restore full saved state
+                # If we were in interruption and ISP contains a saved context,
+                # support returning from interrupt via RET (fallback behaviour)
+                if dp.in_interruption and not dp.isp_empty():
                     self._restore_interrupt_return_state()
                 return
-            # returning from interrupt (if in_interruption and no call stack)
-            if dp.in_interruption and dp.interrupt_return_state:
+            # returning from interrupt (if in_interruption and ISP not empty)
+            if dp.in_interruption and not dp.isp_empty():
                 self._restore_interrupt_return_state()
                 return
             dp.PC = len(dp.memory)
@@ -895,7 +1009,7 @@ class ControlUnit:
             logging.debug("DI -> interrupts disabled")
             return
         if opcode == OpCode.IRET:
-            # restore saved state fully
+            # restore saved state fully from ISP
             self._restore_interrupt_return_state()
             logging.debug("IRET -> returned from interrupt")
             return
@@ -1191,6 +1305,7 @@ def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | Non
         spc = 1024
     call_stack_cells = cfg.get("call_stack_cells", 1024)
     frame_stack_cells = cfg.get("frame_stack_cells", 256)
+    interrupt_stack_cells = cfg.get("interrupt_stack_cells", 64)
     lenient = cfg.get("lenient_log", False)
 
     dp = Datapath(
@@ -1204,6 +1319,7 @@ def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | Non
         string_pool_cells=spc,
         call_stack_cells=call_stack_cells,
         frame_stack_cells=frame_stack_cells,
+        interrupt_stack_cells=interrupt_stack_cells,
         lenient_log=lenient,
     )
     cu = ControlUnit(dp)
@@ -1236,24 +1352,31 @@ if __name__ == "__main__":
     import argparse
     from parser import Compiler, parse, tokenize
 
-    ap = argparse.ArgumentParser()
-    ap.add_argument("program", help="program.lisp or program.bin")
-    ap.add_argument("--config", help="path to yaml config", default=None)
+    ap = argparse.ArgumentParser(
+        description="Processor VM runner. Accepts Lisp source (.lisp) or binary (.bin). "
+        "Input for MMIO must be provided via --input-schedule (tick char per line)."
+    )
+    ap.add_argument("program", help="program.lisp or program.bin (binary code).")
     ap.add_argument(
         "--input-schedule",
-        help="input schedule file (tick char per line)",
+        help="input schedule file (tick char per line). Each non-empty line: '<tick> <char>'",
         default=None,
     )
-    help_debug = "enable debug logging to logfile"
+    ap.add_argument("--config", help="path to yaml config", default=None)
+
+    help_debug = "enable debug logging to logfile (detailed per-step state)."
     help_logfile = "path to processor log"
-    help_console = "also echo logs to console"
+    help_console = "also echo logs to console (only when --debug)"
     ap.add_argument("--debug", action="store_true", help=help_debug)
     ap.add_argument("--logfile", default=LOGFILE, help=help_logfile)
     ap.add_argument("--console", action="store_true", help=help_console)
     args = ap.parse_args()
 
     # initialize logging according to CLI flags
-    init_logging(logfile=args.logfile, debug=args.debug, console=args.console)
+    # note: original CLI previously referenced args.trace in some environments;
+    # keep behavior conservative and only use args.debug here.
+    debug_enabled = args.debug
+    init_logging(logfile=args.logfile, debug=debug_enabled, console=args.console)
 
     try:
         cfg = load_config(args.config)
@@ -1261,7 +1384,7 @@ if __name__ == "__main__":
         print("Bad config:", e)
         sys.exit(2)
 
-    # read input schedule if exists
+    # helper to parse schedule file with lines "<tick> <char>".
     def parse_schedule_file(path: str) -> list[tuple[int, str]]:
         """Parse schedule file with lines "<tick> <char>".
 
@@ -1298,10 +1421,19 @@ if __name__ == "__main__":
         return result
 
     sched: list[tuple[int, str]] = []
-    if args.input_schedule and Path(args.input_schedule).exists():
-        sched = parse_schedule_file(args.input_schedule)
-        logging.debug("CLI: parsed schedule from %s: %r", args.input_schedule, sched)
+    if args.input_schedule:
+        sched_path = Path(args.input_schedule)
+        if not sched_path.exists():
+            print("Input schedule file not found:", args.input_schedule)
+            sys.exit(2)
+        try:
+            sched = parse_schedule_file(args.input_schedule)
+            logging.debug("CLI: parsed schedule from %s: %r", args.input_schedule, sched)
+        except Exception:
+            logging.exception("Failed to parse --input-schedule: %s")
+            sys.exit(2)
 
+    # Read program: if .lisp compile, otherwise load binary
     if args.program.endswith(".lisp"):
         src = open(args.program, encoding="utf-8").read()
         toks = tokenize(src)
@@ -1311,9 +1443,13 @@ if __name__ == "__main__":
         code_bytes = bytes(comp.code)
         data_bytes = bytes(comp.data)
     else:
-        code_bytes = open(args.program, "rb").read()
+        code_path = Path(args.program)
+        if not code_path.exists():
+            print("Program file not found:", args.program)
+            sys.exit(2)
+        code_bytes = code_path.read_bytes()
         data_path = args.program + ".data"
-        data_bytes = open(data_path, "rb").read() if Path(data_path).exists() else b""
+        data_bytes = Path(data_path).read_bytes() if Path(data_path).exists() else b""
 
     # Decide Datapath creation: if schedule explicitly provided,
     # create Datapath with schedule and run
@@ -1326,24 +1462,28 @@ if __name__ == "__main__":
             spc = 1024
         call_stack_cells = vm_cfg.get("call_stack_cells", 1024)
         frame_stack_cells = vm_cfg.get("frame_stack_cells", 256)
+        interrupt_stack_cells = vm_cfg.get("interrupt_stack_cells", 64)
         lenient = vm_cfg.get("lenient_log", False)
+        mem_cells_cfg = vm_cfg.get("mem_cells", 65536)
+        tick_limit_cfg = vm_cfg.get("tick_limit", 100000)
+        pause_tick_cfg = vm_cfg.get("pause_tick", None)
         dp = Datapath(
             code_bytes,
             data_bytes,
-            mem_cells=vm_cfg["mem_cells"],
+            mem_cells=mem_cells_cfg,
             mmio_in=mmio_in,
             mmio_out=mmio_out,
-            tick_limit=vm_cfg["tick_limit"],
-            pause_tick=vm_cfg["pause_tick"],
+            tick_limit=tick_limit_cfg,
+            pause_tick=pause_tick_cfg,
             string_pool_cells=spc,
             call_stack_cells=call_stack_cells,
             frame_stack_cells=frame_stack_cells,
+            interrupt_stack_cells=interrupt_stack_cells,
             lenient_log=lenient,
         )
         dp.schedule_input(sched)
         cu = ControlUnit(dp)
         out, ticks, state = cu.run()
-        # debug outputs for CLI-sched case
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             try:
                 _write_debug_out_files(code_bytes)
@@ -1352,6 +1492,7 @@ if __name__ == "__main__":
     else:
         out, ticks, state = run_bytes(code_bytes, data_bytes, cfg)
 
+    # print VM output to stdout
     sys.stdout.write(out)
     sys.stdout.write("\n")
     sys.stdout.write("TIKS: " + str(ticks))

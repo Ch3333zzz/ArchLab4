@@ -9,8 +9,10 @@ This module contains:
 from __future__ import annotations
 
 # ruff: noqa: A005
+import argparse
 import re
 import struct
+from pathlib import Path
 from typing import Any, Callable
 
 from isa import INSTR_SIZE, OpCode, encode_instr
@@ -30,7 +32,7 @@ TOKEN_RE = re.compile(
      [\(\)'`]|                      # single-char tokens: ( ) ' ` ,
      "([^"\\]|\\.)*"|               # double-quoted string (with escapes)
      ;[^\n]*|                       # comment until end-of-line
-     [^\s('"`;)]+)                  # atom/symbol (no whitespace or special chars)
+     [^\s('(\`;)] +)                  # atom/symbol (no whitespace or special chars)
     """,
     re.VERBOSE,
 )
@@ -42,6 +44,8 @@ def tokenize(s: str) -> list[str]:
     tokens: list[str] = []
     for m in TOKEN_RE.finditer(s):
         tok = m.group(1)
+        if tok is None:
+            continue
         if tok.startswith(";"):
             continue
         tokens.append(tok)
@@ -182,29 +186,26 @@ class Compiler:
         self.consts[s] = addr
         return addr
 
-    # --- helper to patch/store 24-bit arg preserving opcode byte ---
+    # --- helper to patch/store 32-bit arg preserving opcode word ---
     def _write_arg_at(self, pos: int, arg: int) -> None:
-        """Write the instruction argument into instruction starting at byte pos."""
-        if INSTR_SIZE < 2:
-            err = "INSTR_SIZE must be >= 2"
+        """Write the 32-bit instruction argument into instruction starting at byte pos.
+
+        New layout: instruction is 8 bytes; we store 4-byte little-endian arg at pos..pos+3
+        and leave pos+4..pos+7 (where opcode sits) unchanged.
+        """
+        if INSTR_SIZE < 8:
+            err = "INSTR_SIZE must be >= 8 for 32-bit instruction arg layout"
             raise RuntimeError(err)
 
-        arg_bytes_len = INSTR_SIZE - 1
-        mask = (1 << (8 * arg_bytes_len)) - 1
-        a_val = int(arg) & mask
-        arg_bytes = a_val.to_bytes(arg_bytes_len, byteorder="little", signed=False)
+        arg_bytes = (int(arg) & 0xFFFFFFFF).to_bytes(4, byteorder="little", signed=False)
 
         endpos = pos + INSTR_SIZE
         if len(self.code) < endpos:
-            # should not normally happen, but be robust
+            # be robust: extend with zeros if needed
             self.code += b"\x00" * (endpos - len(self.code))
 
-        # opcode is at the last byte of the instruction (little-endian representation)
-        opcode_pos = pos + arg_bytes_len
-        # write argument bytes into pos .. opcode_pos-1
-        self.code[pos:opcode_pos] = arg_bytes
-
-        # leave self.code[opcode_pos] unchanged (preserve opcode byte)
+        # write 4-byte arg into pos .. pos+3
+        self.code[pos : pos + 4] = arg_bytes
 
         # update debug record if exists
         for i, (a, _b, m) in enumerate(self.debug):
@@ -605,3 +606,103 @@ class Compiler:
         parts = ["call", head, *expr[1:]]
         self.compile_expr(parts)
         return
+
+
+# --- helper entrypoints for using this module programmatically ---
+
+
+def compile_source_bytes(src_bytes: bytes, string_pool_cells: int | None = None) -> tuple[bytes, bytes, Compiler]:
+    """Compile source bytes (UTF-8) and return (code_bytes, data_bytes, compiler).
+
+    The returned `compiler` object allows inspection of `debug`, `labels`, etc.
+    """
+    src = src_bytes.decode("utf-8")
+    toks = tokenize(src)
+    ast = parse(toks)
+    if string_pool_cells is None:
+        string_pool_cells = DEFAULT_STRING_POOL_CELLS
+    comp = Compiler(ast, string_pool_cells=string_pool_cells)
+    comp.compile()
+    return bytes(comp.code), bytes(comp.data), comp
+
+
+def compile_file(
+    input_path: str | Path,
+    out_bin: str | Path | None = None,
+    out_data: str | Path | None = None,
+    string_pool_cells: int | None = None,
+    debug: bool = False,
+) -> tuple[str, str]:
+    """Compile a source file and write output files.
+
+    Returns a tuple (bin_path, data_path).
+    If out_bin/out_data are not provided they are derived from input_path
+    ("<stem>.bin" and "<stem>.bin.data").
+    """
+    p = Path(input_path)
+    if not p.exists():
+        err = f"Source file not found: {input_path}"
+        raise FileNotFoundError(err)
+
+    src_bytes = p.read_bytes()
+    code_bytes, data_bytes, comp = compile_source_bytes(src_bytes, string_pool_cells=string_pool_cells)
+
+    if out_bin is None:
+        out_bin_path = p.with_suffix(".bin")
+    else:
+        out_bin_path = Path(out_bin)
+    if out_data is None:
+        out_data_path = Path(str(out_bin_path) + ".data")
+    else:
+        out_data_path = Path(out_data)
+
+    out_bin_path.write_bytes(code_bytes)
+    out_data_path.write_bytes(data_bytes)
+
+    if debug:
+        # also write debug hex listing similar to processor._write_out_hex
+        try:
+            hex_lines: list[str] = []
+            pc = 0
+            while pc + INSTR_SIZE <= len(code_bytes):
+                opcode_word = code_bytes[pc : pc + INSTR_SIZE]
+                hexbytes = opcode_word.hex().upper()
+                # try to decode (best-effort)
+                from isa import decode_instr, mnemonic
+
+                try:
+                    op, arg = decode_instr(code_bytes, pc)
+                    mnem = mnemonic(op, arg)
+                except Exception:
+                    mnem = "<decode error>"
+                hex_lines.append(f"{pc} - {hexbytes} - {mnem}")
+                pc += INSTR_SIZE
+            Path(str(out_bin_path) + ".hex").write_text("\n".join(hex_lines), encoding="utf-8")
+        except Exception:
+            pass
+
+    return str(out_bin_path), str(out_data_path)
+
+
+# --- CLI ---
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Compile Lisp-like source to VM binary")
+    ap.add_argument("input", help="source file (e.g. program.lisp)")
+    ap.add_argument("-o", "--out", help="output binary file (default: <input>.bin)")
+    ap.add_argument("--data", help="output data file (default: <out>.bin.data)")
+    ap.add_argument(
+        "--string-pool-cells",
+        type=int,
+        help=f"number of words reserved for string pool (default: {DEFAULT_STRING_POOL_CELLS})",
+    )
+    ap.add_argument("--debug", action="store_true", help="write additional debug hex file (<out>.hex)")
+    args = ap.parse_args()
+
+    out_bin, out_data = compile_file(
+        args.input,
+        out_bin=args.out,
+        out_data=args.data,
+        string_pool_cells=args.string_pool_cells,
+        debug=args.debug,
+    )
+    print(out_bin)

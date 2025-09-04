@@ -47,35 +47,36 @@ class OpCode(IntEnum):
 
     # --- new array/heap ops ---
     ALLOC = 84  # allocate arg words (if arg==0, take size from ACC)
-    ASET = 85  # array set: if arg!=0 base=arg else pop idx then pop base; write ACC
-    AGET = 86  # array get: if arg!=0 base=arg else pop idx then pop base; load ACC
+    ASET = 85  # array set
+    AGET = 86  # array get
 
     BINOP_POP = 90  # arg: 1=ADD,2=SUB,3=MUL,4=DIV  (pop v; ACC = v <op> ACC)
-    CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=   (pop v; ACC = cond(v, ACC) ? 1 : 0)
+    CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=
 
 
-# Instruction size is now 4 bytes (single machine word)
-# Layout (32-bit little-endian word):
-#  bytes (low..high) : [ arg_low (8) | arg_mid (8) | arg_high (8) | opcode (8) ]
-#  i.e. 24-bit signed arg in low 3 bytes, 8-bit opcode in high byte
-INSTR_SIZE = 4  # 4 bytes per instruction
+# Instruction size is now 8 bytes (two machine words). Machine word stays 32 bits.
+# Layout (64-bit little-endian):
+#   low 4 bytes  : signed 32-bit arg (little-endian)
+#   high 4 bytes : opcode (low 8 bits used), other bits reserved/zero
+INSTR_SIZE = 8  # 8 bytes per instruction (two 32-bit words)
 
 
 def encode_instr(opcode: OpCode, arg: int = 0) -> bytes:
-    """Encode instruction into 4 bytes.
+    """Encode instruction into 8 bytes.
 
-    Format: 32-bit little-endian word: (opcode << 24) | (arg & 0x00FFFFFF)
-    Arg is treated as 24-bit signed value when decoded.
+    Format (little-endian 64-bit):
+      word64 = (opcode << 32) | (arg & 0xFFFFFFFF)
+
+    Arg is stored as 32-bit value (decode_instr will sign-extend to signed int).
     """
     op = int(opcode) & 0xFF
     try:
         a = int(arg)
     except Exception:
         a = 0
-    # store only low 24 bits
-    a24 = a & 0xFFFFFF
-    word = (op << 24) | a24
-    return struct.pack("<I", word)
+    a32 = a & 0xFFFFFFFF
+    word64 = (op << 32) | a32
+    return struct.pack("<Q", word64)
 
 
 def decode_instr(blob: bytes, offset: int) -> tuple[OpCode, int]:
@@ -88,12 +89,12 @@ def decode_instr(blob: bytes, offset: int) -> tuple[OpCode, int]:
     if len(b) < INSTR_SIZE:
         err = "End of program"
         raise EOFError(err)
-    (word,) = struct.unpack("<I", b)
-    op = (word >> 24) & 0xFF
-    arg_raw = word & 0xFFFFFF
-    # sign-extend 24-bit
-    if arg_raw & 0x800000:
-        arg = arg_raw - (1 << 24)
+    (word64,) = struct.unpack("<Q", b)
+    op = (word64 >> 32) & 0xFF
+    arg_raw = word64 & 0xFFFFFFFF
+    # sign-extend 32-bit
+    if arg_raw & 0x80000000:
+        arg = arg_raw - (1 << 32)
     else:
         arg = arg_raw
     return OpCode(op), int(arg)
