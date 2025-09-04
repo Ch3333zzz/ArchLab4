@@ -22,11 +22,6 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     """Configure root logger to write to `logfile`.
 
     If debug=True set DEBUG level. If console=True also echo logs to stdout.
-
-    NOTE: when debug=True we use a compact log format without timestamp so that
-    entries look like:
-        DEBUG root:processor.py:197 Datapath: heap_ptr initialized to word 1027
-    which matches the requested style.
     """
     root = logging.getLogger()
     for h in list(root.handlers):
@@ -56,7 +51,7 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
             if not self._seen_first:
                 self._seen_first = True
                 return s
-            return "    " + s
+            return s
 
     # always create a FileHandler even when not debug to allow easier inspection if asked
     fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
@@ -89,9 +84,29 @@ def _flush_logging_handlers() -> None:
         pass
 
 
+def _get_log_dir() -> Path:
+    """Return directory where processor.log FileHandler writes, or cwd if unknown.
+
+    This ensures debug files (out.bin/out.hex) are colocated with the configured
+    log file (useful for the test harness which provides a logfile path in tmp).
+    """
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        # FileHandler exposes baseFilename attribute
+        base = getattr(h, "baseFilename", None)
+        if isinstance(base, str) and base:
+            try:
+                return Path(base).parent
+            except Exception:
+                pass
+    return Path.cwd()
+
+
 def _write_out_bin(code_bytes: bytes) -> None:
     try:
-        with open("out.bin", "wb") as f:
+        out_dir = _get_log_dir()
+        out_path = out_dir / "out.bin"
+        with open(out_path, "wb") as f:
             f.write(code_bytes)
     except Exception as e:
         logging.debug("Failed to write out.bin: %s", e)
@@ -118,7 +133,9 @@ def _write_out_hex(code_bytes: bytes) -> None:
                 break
             pc += INSTR_SIZE
         code_hex = "\n".join(code_hex_lines)
-        with open("out.hex", "w", encoding="utf-8") as f:
+        out_dir = _get_log_dir()
+        out_path = out_dir / "out.hex"
+        with open(out_path, "w", encoding="utf-8") as f:
             f.write(code_hex)
     except Exception as e:
         logging.debug("Failed to write out.hex: %s", e)
@@ -824,6 +841,15 @@ class ControlUnit:
         except Exception as e:
             logging.debug("Failed to write memory dump: %s", e)
 
+        # Ensure debug binary/hex files are written when debug logging is enabled.
+        # The test harness constructs Datapath/ControlUnit and calls cu.run()
+        # directly, so produce out.bin/out.hex here (placed next to processor.log).
+        try:
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                _write_debug_out_files(dp.code_bytes)
+        except Exception as e:
+            logging.debug("Failed to write out.bin/out.hex: %s", e)
+
         return (
             "".join(out_chars),
             dp.tick,
@@ -1224,7 +1250,8 @@ class ControlUnit:
                 chrepr = chr(dp.ACC)
             except Exception:
                 chrepr = repr(dp.ACC)
-            logging.debug("READ: got %s ('%s')", dp.ACC, chrepr)
+            if chrepr != "\n":
+                logging.debug("READ: got %s ('%s')", dp.ACC, chrepr)
             dp.mem_write_word(dp.mmio_in, 0)
             return
         logging.debug("Unhandled opcode: %s", opcode)

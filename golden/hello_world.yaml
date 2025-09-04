@@ -1,0 +1,46 @@
+name: hello-world
+config: {}
+source:
+  language: lisp
+  code: |
+    (print "Hello, world!")
+expect:
+  out_stdout: Hello, world!
+  state: stopped
+  error: false
+  out_code: !!binary | 
+    AAAAABQAAAAAAAAARgAAAAAAAAABAAAA
+  out_code_hex: |-
+    0 - 0000000014000000 - LOAD_CONST 0
+    8 - 0000000046000000 - PRINT
+    16 - 0000000001000000 - HALT
+  out_log: |-
+    DEBUG root:processor.py:251 Datapath: heap_ptr initialized to word 1030
+    DEBUG root:processor.py:720 No more scheduled input and mmio_in_buffer empty -> input closed (EOF)
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    0 PC:  4096 ADDR:     0 MEM[ADDR]:         13 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    0 PC:  4096 ADDR:     0 MEM[ADDR]:         13 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: LOAD_CONST 0
+    DEBUG root:processor.py:798 Tick 0 PC 4096: LOAD_CONST 0 ACC=0 SP=64192 FSP=64512 CP=65536
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: EXECUTION       TICK:    0 PC:  4104 ADDR:     2 MEM[ADDR]:        101 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: LOAD_CONST 0
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    1 PC:  4104 ADDR:     2 MEM[ADDR]:        101 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    1 PC:  4104 ADDR:     2 MEM[ADDR]:        101 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:798 Tick 1 PC 4104: PRINT 0 ACC=0 SP=64192 FSP=64512 CP=65536
+    DEBUG root:processor.py:1226 PRINT: Detected pstr at 0 len=13
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 72 -> char: H
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 101 -> char: e
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 108 -> char: l
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 108 -> char: l
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 111 -> char: o
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 44 -> char: ,
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 32 -> char:  
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 119 -> char: w
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 111 -> char: o
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 114 -> char: r
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 108 -> char: l
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 100 -> char: d
+    DEBUG root:processor.py:381 [MMIO OUT] wrote 33 -> char: !
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: EXECUTION       TICK:    1 PC:  4112 ADDR:     4 MEM[ADDR]:        108 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: PRINT
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: COMMAND_FETCH   TICK:    2 PC:  4112 ADDR:     4 MEM[ADDR]:        108 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: fetch
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: OPERAND_FETCH   TICK:    2 PC:  4112 ADDR:     4 MEM[ADDR]:        108 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: HALT
+    DEBUG root:processor.py:798 Tick 2 PC 4112: HALT 0 ACC=0 SP=64192 FSP=64512 CP=65536
+    DEBUG root:processor.py:695 STATE: RUNNING    STEP: EXECUTION       TICK:    2 PC:  4120 ADDR:     6 MEM[ADDR]:         44 ACC:          0 SP: 64192 FSP: 64512 CP: 65536 ISP: 64256 heap_ptr:  1030 C: 0 V: 0	INSTR: HALT
+    DEBUG root:processor.py:829 HALT encountered
