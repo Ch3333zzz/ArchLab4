@@ -243,7 +243,9 @@ high addresses (word mem_cells-1)
 
     Строки (pstr): Length-prefixed Pascal-style: первый word = len, потом len слов — по одному символу на слово (символ в младшем байте).
 ## Адресация и представление инструкций
-    Адресация памяти: все адреса в командной системе принимаются как word indices (0..mem_cells-1); PC при выполнении инструкции вычисляется в байтах (PC указывает на начало 8-байтовой инструкции).
+    Адресация памяти: все адреса в командной системе принимаются как word indices (0..mem_cells-1);
+    
+    PC при выполнении инструкции вычисляется в байтах (PC указывает на начало 8-байтовой инструкции).
 
     Инструкция (кодирование):
 
@@ -381,14 +383,16 @@ high addresses (word mem_cells-1)
     Назначение: прочитать .lisp файл и исполнить его (использует модуль parser.py)
 
 ### Интерфейс командной строки
-    ```python processor.py <program> [--config CONFIG] [--input-schedule SCHEDFILE] [--debug] [--logfile FILE] [--console]```
-    параметры:
-     <program> - имя входного файла  (.bin или можно сразу .lisp)
-     --config CONFIG - путь к .yaml кофигу
-     --input-schedule - путь к расписанию ввода
-     --debug - включает логировани
-     --logfile  - путь для файла логирования
-     --console - дублирует лог в stdout
+```python processor.py <program> [--config CONFIG] [--input-schedule SCHEDFILE] [--debug] [--logfile FILE] [--console]```
+
+параметры:
+-program - имя входного файла  (.bin или можно сразу .lisp)
+--config CONFIG - путь к .yaml кофигу
+--input-schedule - путь к расписанию ввода
+--debug - включает логировани
+--logfile  - путь для файла логирования
+--console - дублирует лог в stdout
+
 ### Datapath
 ![Diagram of datapath](./resources/Datapath.png)
     Реализован в классе Datapath
