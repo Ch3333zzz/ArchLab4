@@ -36,7 +36,7 @@ TOKEN_RE = re.compile(
     """,
     re.VERBOSE,
 )
-FORBIDDEN_FOR_USER = {"push", "pop", "ei", "di", "halt"}
+FORBIDDEN_FOR_USER = {"push", "pop", "halt"}
 
 
 def tokenize(s: str) -> list[str]:
