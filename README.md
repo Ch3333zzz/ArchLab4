@@ -376,6 +376,7 @@ python processor.py <program> [--config CONFIG] [--input-schedule SCHEDFILE] [--
 - `int_req` - запрос на прерывания
 - `sel` - выбрать соответствующий вход мультиалексора
 - `flags` - передать флаги в CU
+
 Реализован в классе Datapath
 ### ControlUnit
 ![Diagram of datapath](./resources/CU.png)
@@ -383,6 +384,7 @@ python processor.py <program> [--config CONFIG] [--input-schedule SCHEDFILE] [--
 - `latch_ + name` - защелкнуть значение
 - `math_op` - выполнить простую математическую операцию (сложение, умножение, вычитание, деление)
 - `sel` - выбрать соответствующий вход мультиалексора
+
 Реализован в классе ControlUnit
 # Тестирование
 [./golden/add64.yaml](./golden/cat.yaml) - сложение 64битных чисел
