@@ -29,15 +29,15 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     lvl = logging.DEBUG if debug else logging.CRITICAL
     root.setLevel(lvl)
 
-    # Choose formats. In debug mode use compact format (no timestamp) so lines match:
+    # Choose formats:
     if debug:
         file_fmt = "%(levelname)s %(name)s:%(filename)s:%(lineno)d %(message)s"
     else:
         file_fmt = "%(levelname)-5s %(message)s"
 
     # Custom formatter that indents all but the first formatted record.
-    # This reproduces the example where the first debug line appears without
-    # indentation and subsequent lines are indented for readability.
+    # This is important for the tests
+    # to check them correctly.
     class _IndentOnceFormatter(logging.Formatter):
         def __init__(self, fmt: str | None = None):
             super().__init__(fmt)
@@ -53,7 +53,7 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
                 return s
             return s
 
-    # always create a FileHandler even when not debug to allow easier inspection if asked
+    # always create a FileHandler
     fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
     fh.setLevel(lvl)
     if debug:
@@ -63,15 +63,15 @@ def init_logging(logfile: str = LOGFILE, debug: bool = False, console: bool = Fa
     root.addHandler(fh)
 
     if debug and console:
-        # Console: keep concise but readable
+        # Console
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(lvl)
-        # console shows level and message (no filename by default)
+        # console shows level and message
         ch.setFormatter(logging.Formatter("%(levelname)5s %(message)s"))
         root.addHandler(ch)
 
 
-# --- debug output helpers (split out to reduce complexity) ---
+# --- debug output helpers ---
 def _flush_logging_handlers() -> None:
     try:
         for h in list(logging.getLogger().handlers):
@@ -148,7 +148,7 @@ def _write_debug_out_files(code_bytes: bytes) -> None:
 
 
 class Datapath:
-    """Datapath (memory + registers + MMIO buffers) for the VM."""
+    """Datapath (memory + registers + MMIO buffers)"""
 
     # configuration
     code_bytes: bytes
@@ -653,7 +653,7 @@ class ControlUnit:
     dp: Datapath
 
     def __init__(self, dp: Datapath) -> None:
-        """Create a ControlUnit bound to `dp`."""
+        """Create a ControlUnit."""
         self.dp = dp
 
     def _format_instr(self, opcode: OpCode, arg: int) -> str:
@@ -841,9 +841,9 @@ class ControlUnit:
         except Exception as e:
             logging.debug("Failed to write memory dump: %s", e)
 
-        # Ensure debug binary/hex files are written when debug logging is enabled.
-        # The test harness constructs Datapath/ControlUnit and calls cu.run()
-        # directly, so produce out.bin/out.hex here (placed next to processor.log).
+        # Cheching for debug files.
+        # The tests call cu.run().
+        # There we are saving log files.
         try:
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 _write_debug_out_files(dp.code_bytes)
@@ -867,8 +867,8 @@ class ControlUnit:
             logging.debug("No interruption_vector set -> ignore interrupt")
             return
 
-        # Save full context needed to restore execution (PC points to the instruction about to be executed)
-        # We push a compact context onto ISP in this order (push CP first, PC last),
+        # Save full context needed to restore execution
+        # We push  context onto ISP in this order (push CP first, PC last),
         # so pop order will be: PC, ACC, FP, runtime_len, FSP, CP
         try:
             # Prevent nested saves from being interrupted in the middle: disallow further interrupts
@@ -946,7 +946,7 @@ class ControlUnit:
             x = int(x) & 0xFFFFFFFF
             return x if x < 0x80000000 else x - 0x100000000
 
-        # Hardwired realisation of CU
+        # Hardwired  CU
         if opcode == OpCode.NOP:
             return
         if opcode == OpCode.HALT:
@@ -1035,12 +1035,12 @@ class ControlUnit:
             logging.debug("DI -> interrupts disabled")
             return
         if opcode == OpCode.IRET:
-            # restore saved state fully from ISP
+            # restore saved state from ISP
             self._restore_interrupt_return_state()
             logging.debug("IRET -> returned from interrupt")
             return
         if opcode == OpCode.SOFTINT:
-            # software interrupt: invoke handler immediately (internal)
+            #invoke handler immediately
             dp.last_interrupt_source = "SW"
             logging.debug("SOFTINT executed -> invoking handler")
             self.handle_interrupt()
@@ -1315,7 +1315,7 @@ class ControlUnit:
             f.write("\n=== END DUMP ===\n")
 
 
-# ---------- Public API ----------
+# ---------- Function to run the programm ----------
 def run_bytes(code_bytes: bytes, data_bytes: bytes, config: dict[str, Any] | None) -> tuple[str, int, str]:
     """Run VM on given bytes and config and return (stdout, ticks, state)."""
     cfg = dict(config) if config is not None else {}
@@ -1399,9 +1399,9 @@ if __name__ == "__main__":
     ap.add_argument("--console", action="store_true", help=help_console)
     args = ap.parse_args()
 
-    # initialize logging according to CLI flags
-    # note: original CLI previously referenced args.trace in some environments;
-    # keep behavior conservative and only use args.debug here.
+    # initialize logging
+    # parameters taken from config ot CLI
+    # so there is debug logic.
     debug_enabled = args.debug
     init_logging(logfile=args.logfile, debug=debug_enabled, console=args.console)
 
@@ -1411,9 +1411,9 @@ if __name__ == "__main__":
         print("Bad config:", e)
         sys.exit(2)
 
-    # helper to parse schedule file with lines "<tick> <char>".
+    # helper to parse schedule file.
     def parse_schedule_file(path: str) -> list[tuple[int, str]]:
-        """Parse schedule file with lines "<tick> <char>".
+        """Parse schedule file with lines.
 
         Returns list of (tick, char).
         """
@@ -1478,7 +1478,7 @@ if __name__ == "__main__":
         data_path = args.program + ".data"
         data_bytes = Path(data_path).read_bytes() if Path(data_path).exists() else b""
 
-    # Decide Datapath creation: if schedule explicitly provided,
+    # if schedule explicitly provided,
     # create Datapath with schedule and run
     if sched:
         vm_cfg = cfg.copy()

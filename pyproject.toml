@@ -1,9 +1,6 @@
 [tool.poetry]
 name = "archlab4"
 version = "0.1.0"
-description = "Architecture lab — VM + translator for the course."
-authors = ["Your Name <you@example.com>"]
-license = "BSD"
 readme = "README.md"
 package-mode = false
 

@@ -45,16 +45,16 @@ class OpCode(IntEnum):
     ENTER = 82  # arg: (total_locals << 16) | num_args
     LEAVE = 83  # pop frame
 
-    # --- new array/heap ops ---
+    # --- array/heap ops ---
     ALLOC = 84  # allocate arg words (if arg==0, take size from ACC)
     ASET = 85  # array set
     AGET = 86  # array get
 
-    BINOP_POP = 90  # arg: 1=ADD,2=SUB,3=MUL,4=DIV  (pop v; ACC = v <op> ACC)
+    BINOP_POP = 90  # arg: 1=ADD,2=SUB,3=MUL,4=DIV  (pop value; ACC = value <op> ACC)
     CMP_POP = 91  # arg: 1==,2!=,3<,4<=,5>,6>=
 
 
-# Instruction size is now 8 bytes (two machine words). Machine word stays 32 bits.
+# Instruction size is 8 bytes (two machine words). Machine word stays 32 bits.
 # Layout (64-bit little-endian):
 #   low 4 bytes  : signed 32-bit arg (little-endian)
 #   high 4 bytes : opcode (low 8 bits used), other bits reserved/zero
