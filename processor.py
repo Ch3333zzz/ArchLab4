@@ -1040,7 +1040,7 @@ class ControlUnit:
             logging.debug("IRET -> returned from interrupt")
             return
         if opcode == OpCode.SOFTINT:
-            #invoke handler immediately
+            # invoke handler immediately
             dp.last_interrupt_source = "SW"
             logging.debug("SOFTINT executed -> invoking handler")
             self.handle_interrupt()
